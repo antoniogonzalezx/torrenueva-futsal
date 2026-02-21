@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Torrenueva">
-<meta name="theme-color" content="#0a0a0a">
+<meta name="theme-color" content="#2b3830">
 <title>Torrenueva Futsal</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -16,52 +16,46 @@
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;300;400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
 /*
-  PALETA — de los 3 Coolors del usuario, usamos:
-  - Fondo app: #0a0a0a (negro)
-  - Superficies: #111111, #1a1a1a
-  - Acentos de tarjeta (sin gradientes, planos):
-      #f0ec57  amarillo (paleta 1) — tarjeta A
-      #cbff4d  lima     (paleta 2) — tarjeta B
-      #9cc5a1  menta    (paleta 3) — tarjeta C
-      #bbcea8  sage     (paleta 1) — tarjeta D
-      #dce1de  gris-verde (paleta 3) — tarjeta E
-      #84dd63  verde    (paleta 2) — tarjeta F
-  - Acento activo UI: #f0ec57
-  - Verde positivo:   #cbff4d
-  - Urgencia ×2:      #e3d87e
-  - Urgencia ×4:      #e07070
+  PALETA
+  Cards:   #50ffb1  #4fb286  #3c896d  #546d64  #4d685a
+  Fondo:   #2a3830  (verde grisáceo oscuro — un tono más oscuro que las cards)
+  Superf:  #313f37  #39473e
+  Acento:  #50ffb1  (el más claro de las cards)
+  Positivo:#50ffb1
+  Urg ×2:  #e3d87e
+  Urg ×4:  #e07070
 */
 :root {
-  --bg:    #0a0a0a;
-  --bg1:   #111111;
-  --bg2:   #1a1a1a;
-  --bg3:   #222222;
-  --bor:   #2a2a2a;
-  --txt:   #f0f0f0;
-  --sub:   #606060;
-  --sub2:  #303030;
+  /* Fondo: un tono más oscuro que las cards, verde grisáceo */
+  --bg:    #2b3830;
+  --bg1:   #32413a;
+  --bg2:   #3a4a42;
+  --bg3:   #435249;
+  --bor:   #3e5047;
+  --txt:   #e6f0eb;
+  --sub:   #7a9489;
+  --sub2:  #4c6158;
 
-  --yel:  #f0ec57;
-  --grn:  #cbff4d;
+  --yel:  #50ffb1;   /* acento — el más brillante de la paleta */
+  --grn:  #50ffb1;
   --warm: #e3d87e;
   --red:  #e07070;
 
-  --yel-a: rgba(240,236,87,.14);
-  --grn-a: rgba(203,255,77,.12);
+  --yel-a: rgba(80,255,177,.14);
+  --grn-a: rgba(80,255,177,.11);
   --red-a: rgba(224,112,112,.1);
 
   --safe: env(safe-area-inset-bottom, 0px);
   --r:    18px;
-  --rc:   15px;  /* card radius */
-  --rs:   10px;  /* small radius */
+  --rc:   15px;
+  --rs:   10px;
 
-  /* Card colors — 6 planos sin gradiente */
-  --c0: #f0ec57;   /* amarillo */
-  --c1: #cbff4d;   /* lima */
-  --c2: #9cc5a1;   /* menta */
-  --c3: #bbcea8;   /* sage */
-  --c4: #dce1de;   /* gris verdoso */
-  --c5: #84dd63;   /* verde */
+  /* Card colors — exactamente los 5 del usuario */
+  --c0: #50ffb1;
+  --c1: #4fb286;
+  --c2: #3c896d;
+  --c3: #546d64;
+  --c4: #4d685a;
 }
 
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -168,14 +162,34 @@ input,select{font-family:inherit}
 }
 .pc:active{transform:scale(.984)}
 
-/* Cada color de tarjeta — texto siempre oscuro sobre fondo claro */
+/* Cada color de tarjeta */
 .pc.c0{background:var(--c0)}
 .pc.c1{background:var(--c1)}
 .pc.c2{background:var(--c2)}
 .pc.c3{background:var(--c3)}
 .pc.c4{background:var(--c4)}
-.pc.c5{background:var(--c5)}
-.pc .dim{color:rgba(15,15,15,.45)}
+
+/* c0, c1 claras → texto oscuro; c2–c4 más oscuras → texto claro */
+.pc.c0 .dim,.pc.c1 .dim,.pc.c5 .dim{color:rgba(15,35,25,.45)}
+.pc.c2 .dim,.pc.c3 .dim,.pc.c4 .dim{color:rgba(220,240,230,.4)}
+.pc.c0 .pc-name,.pc.c1 .pc-name,.pc.c5 .pc-name{color:#0d2218}
+.pc.c2 .pc-name,.pc.c3 .pc-name,.pc.c4 .pc-name{color:#e8f5ee}
+.pc.c0 .pc-tot,.pc.c1 .pc-tot,.pc.c5 .pc-tot{color:#0d2218}
+.pc.c2 .pc-tot,.pc.c3 .pc-tot,.pc.c4 .pc-tot{color:#e8f5ee}
+.pc.c0 .pc-hdr,.pc.c1 .pc-hdr,.pc.c5 .pc-hdr{border-bottom-color:rgba(0,0,0,.1)}
+.pc.c2 .pc-hdr,.pc.c3 .pc-hdr,.pc.c4 .pc-hdr{border-bottom-color:rgba(255,255,255,.08)}
+.pc.c0 .fc,.pc.c1 .fc,.pc.c5 .fc{background:rgba(0,0,0,.07);border-color:rgba(0,0,0,.06)}
+.pc.c2 .fc,.pc.c3 .fc,.pc.c4 .fc{background:rgba(0,0,0,.15);border-color:rgba(255,255,255,.05)}
+.pc.c0 .fc-amt,.pc.c1 .fc-amt,.pc.c5 .fc-amt{color:#0d2218}
+.pc.c2 .fc-amt,.pc.c3 .fc-amt,.pc.c4 .fc-amt{color:#e8f5ee}
+.pc.c0 .fc-rsn,.pc.c1 .fc-rsn,.pc.c5 .fc-rsn{color:rgba(15,35,25,.5)}
+.pc.c2 .fc-rsn,.pc.c3 .fc-rsn,.pc.c4 .fc-rsn{color:rgba(220,240,230,.45)}
+.pc.c0 .fc-bot,.pc.c1 .fc-bot,.pc.c5 .fc-bot{color:rgba(15,35,25,.4)}
+.pc.c2 .fc-bot,.pc.c3 .fc-bot,.pc.c4 .fc-bot{color:rgba(220,240,230,.38)}
+.pc.c0 .pbtn,.pc.c1 .pbtn,.pc.c5 .pbtn{border-color:rgba(0,0,0,.18);background:rgba(0,0,0,.07);color:#0d2218}
+.pc.c2 .pbtn,.pc.c3 .pbtn,.pc.c4 .pbtn{border-color:rgba(255,255,255,.2);background:rgba(255,255,255,.06);color:#e8f5ee}
+.pc.c0 .dbtn,.pc.c1 .dbtn,.pc.c5 .dbtn{border-color:rgba(0,0,0,.1);color:rgba(0,0,0,.3)}
+.pc.c2 .dbtn,.pc.c3 .dbtn,.pc.c4 .dbtn{border-color:rgba(255,255,255,.1);color:rgba(255,255,255,.28)}
 
 /* Borde completo de urgencia — 4 lados */
 .pc.w2{border-color:var(--warm) !important}
@@ -189,10 +203,10 @@ input,select{font-family:inherit}
 }
 .pc-em{font-size:2rem;line-height:1;flex-shrink:0}
 .pc-info{flex:1;min-width:0}
-.pc-name{font-size:1rem;font-weight:800;letter-spacing:-.35px;color:#0f0f0f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pc-name{font-size:1rem;font-weight:800;letter-spacing:-.35px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pc-meta{font-size:.57rem;font-weight:600;margin-top:3px;display:flex;align-items:center;gap:7px;color:rgba(15,15,15,.45)}
 .pc-meta .lv{color:#217a40}
-.pc-tot{font-size:1.55rem;font-weight:800;letter-spacing:-1.5px;flex-shrink:0;color:#0f0f0f}
+.pc-tot{font-size:1.55rem;font-weight:800;letter-spacing:-1.5px;flex-shrink:0}
 
 /* Grid 2 columnas */
 .pc-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:9px}
@@ -208,7 +222,7 @@ input,select{font-family:inherit}
 .fc.f2{border-color:var(--warm)}
 .fc.f4{border-color:var(--red)}
 
-.fc-amt{font-size:1.2rem;font-weight:800;letter-spacing:-.8px;line-height:1;color:#0f0f0f}
+.fc-amt{font-size:1.2rem;font-weight:800;letter-spacing:-.8px;line-height:1}
 .fc-amt.or{color:#7a4a00}
 .fc-amt.rd{color:#a02020}
 .fc-rsn{font-size:.68rem;font-weight:500;color:rgba(15,15,15,.5);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.3}
@@ -529,45 +543,19 @@ input,select{font-family:inherit}
     <div class="rkhead"><div class="dot" style="background:var(--red)"></div>más deuda</div>
     <div class="rklist" id="rk-debt"></div>
   </div>
-  <div class="sec">Sin apuntes este mes</div>
+  <div class="sec">Sin multas este mes</div>
   <div class="cgrid" id="clean-grid"></div>
   <div style="height:12px"></div>
 </div>
 
 <!-- ── EQUIPO ── -->
 <div class="pg" id="pg-team">
-  <div class="sec">Equipación</div>
-  <div class="kit-wrap">
-    <img class="kit-img" src="equipacion.jpg" alt="" onerror="this.style.display='none'">
-    <div class="kit-info">
-      <h3>Kit oficial</h3>
-      <div class="kit-rule"><b>Pantalón</b> — del club</div>
-      <div class="kit-rule"><b>Medias</b> — color oficial</div>
-      <div class="kit-rule"><b>Camiseta</b> — entregar limpia</div>
-    </div>
-  </div>
   <div class="sec">Jugadores</div>
   <div class="pl-box" id="player-list"></div>
   <div class="add-row" id="add-player-row" style="display:none">
     <input type="text" id="new-player-name" placeholder="Nombre del jugador">
     <button onclick="addPlayer()">+ Añadir</button>
   </div>
-  <div class="sec">Baremo</div>
-  <div class="rules-box">
-    <div class="rule"><span class="rule-nm">Llegar tarde</span><span class="rule-vl">1€</span></div>
-    <div class="rule"><span class="rule-nm">Pantalón equivocado</span><span class="rule-vl">1€</span></div>
-    <div class="rule"><span class="rule-nm">No avisar ausencia</span><span class="rule-vl">2€</span></div>
-    <div class="rule"><span class="rule-nm">Sin pagar 15 días</span><span class="rule-nt">×2 (solo multas)</span></div>
-    <div class="rule"><span class="rule-nm">Sin pagar 29 días</span><span class="rule-nt">×4 (solo multas)</span></div>
-  </div>
-  <div class="sec">Sistema de vidas</div>
-  <div class="ibox">
-    <div class="ibox-lbl">¿Cómo funciona?</div>
-    <div class="ibox-txt">Cada <b>vida = 1€</b>. Pagar de más acumula crédito para la siguiente multa.<br><br>Los apuntes con <b>«cobro»</b> no duplican aunque pasen 15 días.</div>
-  </div>
-  <div class="sec">Instalar como app</div>
-  <div class="ibox"><div class="ibox-lbl">iOS Safari</div><div class="ibox-txt"><b>Compartir</b> → <b>Añadir a pantalla de inicio</b></div></div>
-  <div class="ibox"><div class="ibox-lbl">Android Chrome</div><div class="ibox-txt">Menú <b>⋮</b> → <b>Instalar app</b></div></div>
   <div style="height:12px"></div>
 </div>
 
@@ -605,11 +593,11 @@ input,select{font-family:inherit}
   </div>
 </div>
 
-<!-- ══ MODAL: NUEVO APUNTE ══ -->
+<!-- ══ MODAL: NUEVA MULTA ══ -->
 <div class="ov" id="fine-ov">
   <div class="sheet">
     <div class="handle"></div>
-    <div class="mtit">Nuevo apunte</div>
+    <div class="mtit">Nueva multa</div>
     <div style="height:14px"></div>
     <div class="field">
       <label>Jugador</label>
@@ -655,7 +643,7 @@ const SUPA_URL     = 'https://cmfhosxslodnrxlpifrn.supabase.co';
 const SUPA_KEY     = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNtZmhvc3hzbG9kbnJ4bHBpZnJuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE2NDY2NTQsImV4cCI6MjA4NzIyMjY1NH0.c4-Zb79UQhshpzQH79gIoro3IBKEliEjBMlhjypa_dc';
 const SEASON_START = new Date('2025-07-01');
 // Colores de tarjeta — rotan por índice de jugador
-const PALETA = ['c0','c1','c2','c3','c4','c5'];
+const PALETA = ['c0','c1','c2','c3','c4'];
 /* ================================================================ */
 
 let isAdmin=false, pinBuf='', pendingAction=null;
@@ -723,7 +711,7 @@ async function render(){
   const dup =pend.filter(f=>mult(f)>1).length;
 
   document.getElementById('h-total').innerHTML=fmt(tot).replace('€','<span class="eur">€</span>');
-  document.getElementById('h-count').textContent=pend.length+' apunte'+(pend.length!==1?'s':'')+' pendiente'+(pend.length!==1?'s':'');
+  document.getElementById('h-count').textContent=pend.length+' multa'+(pend.length!==1?'s':'')+' pendiente'+(pend.length!==1?'s':'');
   document.getElementById('month-lbl').textContent=monName();
   document.getElementById('h-pills').innerHTML=
     `<div class="pill"><b>${pend.filter(f=>isSeas(f.date)).length}</b> esta temporada</div>
@@ -741,7 +729,7 @@ async function render(){
 /* ── TARJETAS ── */
 function renderCards(pend,pls){
   const el=document.getElementById('fines-list');
-  if(!pend.length){el.innerHTML='<div class="empty"><div class="empty-ic">🎉</div><p>sin apuntes pendientes</p></div>';return;}
+  if(!pend.length){el.innerHTML='<div class="empty"><div class="empty-ic">🎉</div><p>sin multas pendientes</p></div>';return;}
 
   const groups={};
   pls.forEach(p=>{groups[p.name]=[];});
@@ -781,7 +769,7 @@ function renderCards(pend,pls){
           <div class="pc-info">
             <div class="pc-name">${player}</div>
             <div class="pc-meta">
-              <span>${ff.length} apunte${ff.length!==1?'s':''}</span>
+              <span>${ff.length} multa${ff.length!==1?'s':''}</span>
               ${lv>0?`<span class="lv">❤️ ${fmt(lv)}</span>`:''}
             </div>
           </div>
