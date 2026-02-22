@@ -820,7 +820,7 @@ function renderRanking(all,paid,pls){
   rkList('rk-month',mT,true);
   const dp=all.filter(f=>!f.paid&&isMon(f.date));
   const dT={};dp.forEach(f=>{dT[f.player]=(dT[f.player]||0)+eff(f);});
-  rkList('rk-debt',dT,false);
+  rkList('rk-debt',dT,true);
   const dirty=new Set(dp.map(f=>f.player));
   const clean=pls.filter(p=>!dirty.has(p.name));
   document.getElementById('clean-grid').innerHTML=clean.length
