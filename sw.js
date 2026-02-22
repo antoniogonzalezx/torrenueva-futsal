@@ -1,5 +1,5 @@
-const CACHE = 'multas-v1';
-const ASSETS = ['/', '/index.html', '/manifest.json', '/escudo.png', '/equipacion.jpg'];
+const CACHE = 'multas-v3';
+const ASSETS = ['/manifest.json', '/escudo.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(
@@ -18,11 +18,29 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  // No cachear las llamadas a Supabase — siempre deben ir a red
-  if (e.request.url.includes('supabase.co')) {
+  const url = e.request.url;
+
+  // Supabase → siempre red, nunca caché
+  if (url.includes('supabase.co')) {
     e.respondWith(fetch(e.request));
     return;
   }
+
+  // HTML → network-first: intenta red, si falla usa caché
+  if (e.request.mode === 'navigate' || url.endsWith('.html') || url.endsWith('/')) {
+    e.respondWith(
+      fetch(e.request)
+        .then(res => {
+          const clone = res.clone();
+          caches.open(CACHE).then(c => c.put(e.request, clone));
+          return res;
+        })
+        .catch(() => caches.match(e.request))
+    );
+    return;
+  }
+
+  // Resto → cache-first
   e.respondWith(
     caches.match(e.request).then(r => r || fetch(e.request))
   );
