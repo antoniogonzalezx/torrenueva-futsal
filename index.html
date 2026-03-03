@@ -22,8 +22,8 @@
   Superf:  #313f37  #39473e
   Acento:  #50ffb1  (el más claro de las cards)
   Positivo:#50ffb1
-  Urg ×2:  #e3d87e
-  Urg ×4:  #e07070
+  Urg ×2:  #FF6B6B  (rojo claro, contraste garantizado sobre cualquier card)
+  Urg ×4:  #FF2D55  (granate intenso)
 */
 :root {
   /* Fondo: un tono más oscuro que las cards, verde grisáceo */
@@ -38,12 +38,12 @@
 
   --yel:  #50ffb1;   /* acento — el más brillante de la paleta */
   --grn:  #50ffb1;
-  --warm: #e3d87e;
-  --red:  #e07070;
+  --warm: #FF6B6B;   /* ×2 — rojo claro */
+  --red:  #FF2D55;   /* ×4 — granate intenso */
 
   --yel-a: rgba(80,255,177,.14);
   --grn-a: rgba(80,255,177,.11);
-  --red-a: rgba(224,112,112,.1);
+  --red-a: rgba(255,45,85,.1);
 
   --safe: env(safe-area-inset-bottom, 0px);
   --r:    18px;
@@ -192,8 +192,8 @@ input,select{font-family:inherit}
 .pc.c2 .dbtn,.pc.c3 .dbtn,.pc.c4 .dbtn{border-color:rgba(255,255,255,.1);color:rgba(255,255,255,.28)}
 
 /* Borde completo de urgencia — 4 lados */
-.pc.w2{border-color:var(--warm) !important}
-.pc.w4{border-color:var(--red)  !important}
+.pc.w2{border-color:#FF6B6B !important}
+.pc.w4{border-color:#C0143C !important}
 
 /* Header card */
 .pc-hdr{
@@ -219,17 +219,33 @@ input,select{font-family:inherit}
   background:rgba(0,0,0,.07);
   border:1.5px solid transparent;
 }
-.fc.f2{border-color:var(--warm)}
-.fc.f4{border-color:var(--red)}
+
+/* ── CAMBIO: bordes urgentes más visibles ── */
+.fc.f2{border-color:#FF6B6B}
+.fc.f4{border-color:#C0143C}
 
 .fc-amt{font-size:1.2rem;font-weight:800;letter-spacing:-.8px;line-height:1}
-.fc-amt.or{color:#7a4a00}
-.fc-amt.rd{color:#a02020}
+
+/* ── CAMBIO: colores de importe con contraste garantizado sobre cualquier card ── */
+.fc-amt.or{color:#FF6B6B}   /* ×2 — rojo claro, legible sobre c0–c4 */
+.fc-amt.rd{color:#FF2D55}   /* ×4 — granate intenso */
+
 .fc-rsn{font-size:.68rem;font-weight:500;color:rgba(15,15,15,.5);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.3}
 .fc-bot{font-size:.54rem;font-weight:600;display:flex;align-items:center;justify-content:space-between;margin-top:2px;color:rgba(15,15,15,.4)}
+
+/* ── CAMBIO: badges ×2 y ×4 con fondo semi-opaco blanco + borde de color ── */
 .bdg{font-size:.49rem;padding:1px 5px;border-radius:4px;font-weight:700;letter-spacing:.3px}
-.bdg.x2{background:rgba(122,74,0,.15);color:#7a4a00}
-.bdg.x4{background:rgba(160,32,32,.15);color:#a02020}
+.bdg.x2{
+  background:rgba(255,255,255,.22);
+  color:#FF6B6B;
+  border:1px solid rgba(255,107,107,.5);
+}
+.bdg.x4{
+  background:rgba(255,255,255,.18);
+  color:#FF2D55;
+  border:1px solid rgba(192,20,60,.6);
+}
+
 .cobro-tag{font-size:.49rem;padding:1px 5px;border-radius:4px;font-weight:700;letter-spacing:.3px;background:rgba(0,0,0,.08);color:rgba(15,15,15,.45)}
 .fc-btns{display:flex;gap:4px;margin-top:6px}
 .pbtn{
