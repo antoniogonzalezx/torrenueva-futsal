@@ -1,6 +1,7 @@
-// Lee resultados y horarios de ffcm.es y los guarda en public.fixtures.
-//  · La llama pg_cron cada noche (cabecera x-notify-secret) y un admin desde la app (su JWT).
-//  · Después cierra las jornadas viejas y pide a «notify» el push con los puntos de la quiniela.
+// Lee resultados de ffcm.es, los guarda en public.fixtures y cierra la jornada de la quiniela.
+//  · La llama el GitHub Action de los domingos a las 22:00 (cabecera x-notify-secret; un admin también puede, con su JWT).
+//  · Después cierra la jornada jugada (lo que siga sin resultado queda anulado y se abre la siguiente)
+//    y pide a «notify» el push con los puntos.
 //  · ?debug=<jornada> devuelve el texto que se ha extraído de la página, para ajustar el lector.
 //  · ffcm.es devuelve páginas vacías a los servidores de Supabase, así que las descarga un GitHub Action
 //    (scripts/ffcm_fetch.mjs): pide { action: "plan" } → lista de URLs, las descarga y las manda en
@@ -121,7 +122,7 @@ Deno.serve(async (req) => {
       if (html.trim()) gotContent = true;
       return html;
     };
-    const soon = new Date(Date.now() + 8 * 864e5).toLocaleDateString("sv-SE", { timeZone: "Europe/Madrid" });
+    const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Madrid" });
     const { data: comps, error } = await db.from("competitions").select("*").not("ffcm_competicion", "is", null);
     if (error) throw error;
 
@@ -135,13 +136,11 @@ Deno.serve(async (req) => {
         report.push({ competition: c.id, pages: out });
         continue;
       }
-      // Hasta la jornada de la semana que viene (para los horarios), las más recientes primero.
-      // De las jornadas abiertas se revisa todo (la federación corrige actas); de las cerradas, lo que siga sin resultado
-      // (partidos aplazados que se juegan después: ya no cuentan en la quiniela, pero sí en la clasificación).
+      // Jornadas sin cerrar que ya se han jugado (normalmente, la del sábado).
       const { data: rounds } = await db.from("rounds").select("id,num,match_date,closed")
-        .eq("competition_id", c.id).lte("match_date", soon).order("match_date", { ascending: false });
+        .eq("competition_id", c.id).eq("closed", false).lte("match_date", today).order("match_date", { ascending: false });
       const { data: fixtures } = await db.from("fixtures").select("*").in("round_id", (rounds || []).map((r) => r.id));
-      const pending = (r: Round) => (fixtures as Fixture[]).filter((f) => f.round_id === r.id && !f.manual && (!r.closed || f.home_goals == null));
+      const pending = (r: Round) => (fixtures as Fixture[]).filter((f) => f.round_id === r.id && !f.manual);
       const todo = (rounds as Round[]).filter((r) => pending(r).length).slice(0, 6);
 
       for (const r of todo) {
@@ -177,8 +176,8 @@ Deno.serve(async (req) => {
     if (debug) return json(report);
     if (planned) return json({ urls: [...new Set(planned)] });
 
+    // Cierra la jornada jugada y abre la siguiente; después, push con los puntos.
     await db.rpc("close_rounds");
-    // Push con los puntos: la primera sincronización después del día de la jornada (la noche del domingo).
     if (hook) {
       await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/notify`, {
         method: "POST", headers: { "Content-Type": "application/json", "x-notify-secret": hook },

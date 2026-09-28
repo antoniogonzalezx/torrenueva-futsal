@@ -26,7 +26,8 @@ const S = {
   me: null, team: null, members: [], fines: [], credit: [],
   posts: [], feedMore: false, channel: null, installEvt: null,
   hist: { tab: 'paid', who: '' },
-  liga: { comp: null, rounds: [], fixtures: [], tab: 'quiniela', round: null, loaded: null, picks: [], entries: [], ranking: [], draft: {} },
+  liga: { comp: null, rounds: [], fixtures: [], tab: 'jornada', round: null, loaded: null, picks: [], entries: [],
+          rankRound: null, rankLoaded: null, ranking: [], draft: {} },
 };
 
 /* ── Utilidades ────────────────────────────────── */
@@ -92,7 +93,7 @@ function errMsg(e) {
     POST_NOT_FOUND: 'Esa publicación ya no existe.', FINE_POST: 'Las multas se borran desde la pantalla de Multas.',
     QUINIELA_CLOSED: 'La quiniela de esta jornada ya está cerrada.', QUINIELA_INCOMPLETE: 'Tienes que rellenar todos los partidos.',
     TOO_MANY_DOUBLES: 'Solo puedes usar 4 dobles por jornada.', BAD_PICK: 'Algún pronóstico no es válido.',
-    ROUND_NOT_FOUND: 'Esa jornada no existe.', FIXTURE_NOT_FOUND: 'Ese partido no existe.', BAD_SCORE: 'Pon los goles de los dos equipos o de ninguno.',
+    ROUND_NOT_FOUND: 'Esa jornada no existe.', ROUND_NOT_OPEN: 'Esa jornada ya no está abierta.', FIXTURE_NOT_FOUND: 'Ese partido no existe.', BAD_SCORE: 'Pon los goles de los dos equipos o de ninguno.',
     'row-level security': 'No tienes permiso para hacer eso.',
     'exceeded the maximum allowed size': 'La foto pesa demasiado. Prueba con otra.',
   };
@@ -151,7 +152,7 @@ async function boot() {
   sb.auth.onAuthStateChange(ev => { if (ev === 'SIGNED_OUT') setTimeout(() => { teardown(); renderAuth(); }, 0); });
   addEventListener('hashchange', () => S.me && route());
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && S.me) { S.liga.loaded = null; Promise.all([loadData(), loadFeed(), loadLiga()]).then(() => refresh()); }
+    if (document.visibilityState === 'visible' && S.me) { S.liga.loaded = S.liga.rankLoaded = null; Promise.all([loadData(), loadFeed(), loadLiga()]).then(() => refresh()); }
   });
   const { data: { session } } = await sb.auth.getSession();
   if (session) await enterApp(); else renderAuth();
@@ -159,7 +160,7 @@ async function boot() {
 function teardown() {
   if (S.channel) { sb.removeChannel(S.channel); S.channel = null; }
   Object.assign(S, { me: null, team: null, members: [], fines: [], credit: [], posts: [] });
-  Object.assign(S.liga, { comp: null, rounds: [], fixtures: [], round: null, loaded: null, picks: [], entries: [], ranking: [], draft: {} });
+  Object.assign(S.liga, { comp: null, rounds: [], fixtures: [], round: null, loaded: null, picks: [], entries: [], rankRound: null, rankLoaded: null, ranking: [], draft: {} });
 }
 
 /* ════════════════════════════════════════════════
@@ -320,9 +321,9 @@ function renderShell() {
   });
   renderTabs();
 }
-// La pestaña Liga solo aparece si el equipo tiene competición.
+// La pestaña Quiniela solo aparece si el equipo tiene competición.
 function renderTabs() {
-  $('#tabs').innerHTML = tab('multas', 'Multas', 'euro') + tab('feed', 'Feed', 'feed') + (S.liga.comp ? tab('liga', 'Liga', 'trophy') : '')
+  $('#tabs').innerHTML = tab('multas', 'Multas', 'euro') + tab('feed', 'Feed', 'feed') + (S.liga.comp ? tab('quiniela', 'Quiniela', 'trophy') : '')
     + tab('plantilla', 'Plantilla', 'user-list') + tab('historial', 'Historial', 'time');
 }
 const tab = (r, l, ic) => `<a class="tab" href="#${r}" data-tab="${r}">${icon(ic)}<span>${l}</span>${r === 'feed' ? '<i class="dot" id="feed-dot" hidden></i>' : ''}</a>`;
@@ -372,9 +373,10 @@ function subscribe() {
 
 /* ── Router ────────────────────────────────────── */
 function current() {
-  const h = decodeURIComponent(location.hash.slice(1));
+  let h = decodeURIComponent(location.hash.slice(1));
+  if (h === 'liga') h = 'quiniela';   // enlaces antiguos
   if (h.startsWith('jugador/')) return { name: 'jugador', id: h.slice(8) };
-  return { name: ['feed', 'plantilla', 'historial'].includes(h) || (h === 'liga' && S.liga.comp) ? h : 'multas' };
+  return { name: ['feed', 'plantilla', 'historial'].includes(h) || (h === 'quiniela' && S.liga.comp) ? h : 'multas' };
 }
 function route() { closeSheet(true); refresh(true); }
 function refresh(fresh = false) {
@@ -382,7 +384,7 @@ function refresh(fresh = false) {
   const r = current(), y = view.scrollTop;
   $$('.tab').forEach(t => t.removeAttribute('aria-current'));
   $(`.tab[data-tab="${r.name === 'jugador' ? 'plantilla' : r.name}"]`)?.setAttribute('aria-current', 'page');
-  ({ multas: viewFines, feed: viewFeed, liga: viewLiga, plantilla: viewSquad, historial: viewHistory, jugador: viewProfile })[r.name](view, r);
+  ({ multas: viewFines, feed: viewFeed, quiniela: viewQuiniela, plantilla: viewSquad, historial: viewHistory, jugador: viewProfile })[r.name](view, r);
   view.scrollTop = fresh ? 0 : y;
   if (r.name === 'feed' && S.posts[0]) store.set('feed-seen', S.posts[0].id);
   const dot = $('#feed-dot');
@@ -757,14 +759,15 @@ function viewHistory(view) {
 }
 
 /* ════════════════════════════════════════════════
-   LIGA Y QUINIELA
-   Calendario y resultados de la federación (los sincroniza la edge function ffcm-sync).
-   Quiniela: todos los partidos de la jornada salvo el nuestro; 3 puntos por signo
-   acertado, 1 por doble acertado, máximo 4 dobles; se entrega entera antes del viernes a las 14:00.
+   QUINIELA
+   Todos los partidos de la jornada salvo el nuestro; 3 puntos por signo acertado,
+   1 por doble acertado, máximo 4 dobles; se entrega entera antes del viernes a las 14:00.
+   Solo hay una jornada abierta: el domingo a las 22:00 se leen los resultados de la
+   federación (GitHub Action → ffcm-sync), se cierra y se abre la siguiente.
    ════════════════════════════════════════════════ */
 const SIGNS = ['1', 'X', '2'];
 const MAX_DOUBLES = 4;
-const LIGA_TABS = [['quiniela', 'Quiniela'], ['ranking', 'Ranking'], ['partidos', 'Partidos'], ['tabla', 'Tabla']];
+const Q_TABS = [['jornada', 'Jornada'], ['ranking', 'Ranking']];
 const TZ = { timeZone: 'Europe/Madrid' };
 const fmtRoundDay = iso => new Date(iso + 'T12:00:00').toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' });
 const fmtKick = iso => new Date(iso).toLocaleString('es-ES', { ...TZ, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -778,7 +781,9 @@ function timeLeft(iso) {
 const teamName = n => S.liga.comp?.short_names?.[n] || n.toLowerCase().replace(/(^|[\s/("-])(\p{L})/gu, (_, a, b) => a + b.toUpperCase());
 const roundById = id => S.liga.rounds.find(r => r.id === id);
 const fixturesOf = id => S.liga.fixtures.filter(f => f.round_id === id);
-const isOpen = r => Date.parse(r.deadline) > Date.now();
+const openRound = () => S.liga.rounds.find(r => !r.closed);   // la primera jornada sin cerrar
+const closedRounds = () => S.liga.rounds.filter(r => r.closed);
+const acceptsPicks = r => Date.parse(r.deadline) > Date.now();
 const score = f => f.home_goals != null ? `${f.home_goals}–${f.away_goals}` : '';
 const signOf = f => f.void || f.home_goals == null ? null : f.home_goals > f.away_goals ? '1' : f.home_goals === f.away_goals ? 'X' : '2';
 
@@ -793,59 +798,57 @@ async function loadLiga() {
   ]);
   if (r.error || f.error) return toast(errMsg(r.error || f.error));
   S.liga.rounds = r.data; S.liga.fixtures = f.data;
-  if (!roundById(S.liga.round)) S.liga.round = defaultRound()?.id ?? null;
-}
-// La jornada que acaba de jugarse (hasta el lunes) o, si no, la próxima que se puede rellenar.
-function defaultRound() {
-  const rs = S.liga.rounds;
-  const recent = rs.filter(r => r.match_date <= todayISO() && daysSince(r.match_date) <= 2).at(-1);
-  return recent || rs.find(isOpen) || rs.at(-1);
+  S.liga.round = openRound()?.id ?? null;
+  if (!closedRounds().some(x => x.id === S.liga.rankRound)) S.liga.rankRound = null;
 }
 async function loadRound() {
   const id = S.liga.round; S.liga.loaded = id;
-  const [p, e, k] = await Promise.all([
+  if (!id) return;
+  const [p, e] = await Promise.all([
     sb.from('pick_points').select('*').eq('round_id', id),
     sb.rpc('quiniela_entries', { p_round: id }),
-    sb.rpc('quiniela_ranking'),
   ]);
-  const err = p.error || e.error || k.error;
-  if (err) return toast(errMsg(err));
-  Object.assign(S.liga, { picks: p.data, entries: e.data, ranking: k.data });
+  if (p.error || e.error) return toast(errMsg(p.error || e.error));
+  Object.assign(S.liga, { picks: p.data, entries: e.data });
+}
+async function loadRanking() {
+  const id = S.liga.rankRound; S.liga.rankLoaded = id ?? 'total';
+  const { data, error } = await sb.rpc('quiniela_ranking', id ? { p_round: id } : {});
+  if (error) return toast(errMsg(error));
+  S.liga.ranking = data;
 }
 
-function viewLiga(view) {
+function viewQuiniela(view) {
   const L = S.liga;
-  header('Liga', { sub: SUB });
-  view.innerHTML = `<div style="padding:4px var(--gut) 0"><div class="seg">${LIGA_TABS.map(([k, l]) => `<button type="button" data-lt="${k}" aria-pressed="${L.tab === k}">${l}</button>`).join('')}</div></div>
-    <div id="liga-body"></div>`;
+  header('Quiniela', { sub: SUB });
+  view.innerHTML = `<div style="padding:4px var(--gut) 0"><div class="seg">${Q_TABS.map(([k, l]) => `<button type="button" data-lt="${k}" aria-pressed="${L.tab === k}">${l}</button>`).join('')}</div></div>
+    <div id="q-body"></div>`;
   $$('[data-lt]', view).forEach(b => b.onclick = () => { L.tab = b.dataset.lt; refresh(true); });
-  const box = $('#liga-body', view);
-  if (!L.rounds.length) return box.innerHTML = `<div class="empty"><b>Sin calendario</b>Aún no se ha cargado el calendario de la competición.</div>`;
-  if ((L.tab === 'quiniela' || L.tab === 'ranking') && L.loaded !== L.round) {
+  const box = $('#q-body', view);
+  if (!L.rounds.length) return box.innerHTML = `<div class="empty"><b>Sin jornadas</b>Aún no se ha cargado el calendario.</div>`;
+  const pending = L.tab === 'jornada' ? L.loaded !== L.round : L.rankLoaded !== (L.rankRound ?? 'total');
+  if (pending) {
     box.innerHTML = `<p class="label" style="padding:24px var(--gut)">Cargando…</p>`;
-    loadRound().then(() => current().name === 'liga' && refresh());
+    (L.tab === 'jornada' ? loadRound() : loadRanking()).then(() => current().name === 'quiniela' && refresh());
     return;
   }
-  ({ quiniela: ligaQuiniela, ranking: ligaRanking, partidos: ligaMatches, tabla: ligaTable })[L.tab](box);
+  (L.tab === 'jornada' ? quinielaRound : quinielaRanking)(box);
 }
 
-/* ── Quiniela ── */
-function ligaQuiniela(box) {
-  const L = S.liga, r = roundById(L.round), i = L.rounds.indexOf(r);
+/* ── Jornada abierta ── */
+function quinielaRound(box) {
+  const L = S.liga, r = roundById(L.round);
+  if (!r) return box.innerHTML = `<div class="empty"><b>Sin jornada</b>No hay ninguna jornada abierta. La siguiente se abrirá cuando se cargue el calendario.</div>`;
   const fx = fixturesOf(r.id), bet = fx.filter(f => !f.ours), ours = fx.find(f => f.ours);
-  const nav = `<div class="rnav">
-      <button class="hbtn" data-rn="-1" aria-label="Jornada anterior" ${i > 0 ? '' : 'disabled'}>${icon('chevron-left')}</button>
-      <div><b>Jornada ${r.num}</b><span>${fmtRoundDay(r.match_date)}</span></div>
-      <button class="hbtn next" data-rn="1" aria-label="Jornada siguiente" ${i < L.rounds.length - 1 ? '' : 'disabled'}>${icon('chevron-left')}</button></div>`;
   const oursRow = ours ? `<div class="fx ours"><div class="fx-teams"><span>${esc(teamName(ours.home))}</span><span>${esc(teamName(ours.away))}</span></div>
       <div class="fx-res">${score(ours) ? `<b>${score(ours)}</b>` : ''}<span class="label">No entra</span></div></div>` : '';
-  box.innerHTML = nav + (isOpen(r) ? quinielaOpen(r, bet) : quinielaClosed(r, bet)) + oursRow
-    + `<p class="label" style="padding:14px var(--gut)">Signo acertado: 3 puntos · doble acertado: 1 · máximo ${MAX_DOUBLES} dobles. Nuestro partido no entra; los aplazados se anulan.</p>`;
-  $$('[data-rn]', box).forEach(b => b.onclick = () => { L.round = L.rounds[i + +b.dataset.rn].id; refresh(); });
+  box.innerHTML = `<div class="rnav"><div><b>Jornada ${r.num}</b><span>${fmtRoundDay(r.match_date)}</span></div></div>`
+    + (acceptsPicks(r) ? quinielaOpen(r, bet) : quinielaLive(r, bet)) + oursRow
+    + `<p class="label" style="padding:14px var(--gut)">Signo acertado: 3 puntos · doble acertado: 1 · máximo ${MAX_DOUBLES} dobles. Nuestro partido no entra; los aplazados se anulan. La jornada se cierra el domingo a las 22:00 y se abre la siguiente.</p>`;
   if (S.me.is_admin) $$('[data-fx]', box).forEach(b => b.addEventListener('click', e => {
     if (!e.target.closest('[data-s]')) fixtureSheet(L.fixtures.find(f => f.id === +b.dataset.fx));
   }));
-  if (isOpen(r)) bindQuiniela(box, r, bet);
+  if (acceptsPicks(r)) bindQuiniela(box, r, bet);
 }
 
 function quinielaOpen(r, bet) {
@@ -900,8 +903,9 @@ function bindQuiniela(box, r, bet) {
   });
 }
 
-function quinielaClosed(r, bet) {
-  const L = S.liga, played = bet.filter(f => signOf(f)).length, pendingN = bet.filter(f => !f.void && !signOf(f)).length;
+// Entre el cierre de pronósticos (viernes 14:00) y el cierre de la jornada (domingo 22:00): pronósticos de todos y resultados.
+function quinielaLive(r, bet) {
+  const L = S.liga, live = bet.filter(f => !f.void), played = live.filter(f => signOf(f)).length;
   const byMember = new Map();
   L.picks.forEach(p => { if (!byMember.has(p.member_id)) byMember.set(p.member_id, {}); byMember.get(p.member_id)[p.fixture_id] = p; });
   const total = id => Object.values(byMember.get(id) || {}).reduce((s, p) => s + (p.points || 0), 0);
@@ -911,9 +915,9 @@ function quinielaClosed(r, bet) {
   const pickCell = p => !p ? '<i>·</i>' : `<i class="${p.points == null ? '' : p.points ? 'hit' : 'miss'}">${esc(p.signs)}</i>`;
   const cols = `grid-template-columns:minmax(0,1fr) repeat(${bet.length},28px) 34px`;
   return `<section class="block">
-      <div class="meta">${icon('check')}<span>${mine ? 'Tus puntos' : 'No la entregaste'}</span><span>${played} de ${bet.filter(f => !f.void).length} resultados</span></div>
+      <div class="meta">${icon('lock')}<span>${mine ? 'Tus puntos' : 'No la entregaste'}</span><span>${played} de ${live.length} resultados</span></div>
       <div class="amount big">${mine ? total(S.me.id) : '—'}<small>${mine ? 'pts' : ''}</small></div>
-      <div class="facts">${mine ? `<span>${plural(hits3(S.me.id), 'pleno', 'plenos')}</span>` : ''}${pendingN ? `<span>Faltan ${plural(pendingN, 'resultado', 'resultados')}</span>` : '<span>Jornada completa</span>'}</div>
+      <div class="facts"><span>Pronósticos cerrados</span><span>Resultados el domingo a las 22:00</span></div>
     </section>
     <div class="list">${bet.map((f, n) => { const p = mine?.[f.id];
       return `<div class="fx" data-fx="${f.id}"><span class="fx-n">${n + 1}</span><div class="fx-teams"><span>${esc(teamName(f.home))}</span><span>${esc(teamName(f.away))}</span></div>
@@ -926,75 +930,32 @@ function quinielaClosed(r, bet) {
       : `<div class="empty">Nadie entregó la quiniela de esta jornada.</div>`}`;
 }
 
-/* ── Ranking ── */
-function ligaRanking(box) {
-  const rk = [...S.liga.ranking].sort((a, b) => b.points - a.points || b.hits3 - a.hits3 || a.doubles - b.doubles);
-  if (!rk.length) return box.innerHTML = `<div class="empty"><b>0 pts</b>El ranking empieza cuando cierre la primera quiniela.</div>`;
-  const lead = rk[0], lm = memberById(lead.member_id);
-  let pos = 0;
-  box.innerHTML = `<section class="block" style="margin-top:16px">
-      <div class="meta">${icon('trophy')}<span>Líder</span><span>${plural(+lead.rounds, 'jornada', 'jornadas')}</span></div>
-      <div class="amount big">${lead.points}<small>pts</small></div>
-      <div class="facts"><span>${esc(lm?.name || '¿?')}</span><span>${plural(+lead.hits3, 'pleno', 'plenos')}</span></div></section>
-    <div class="list">${rk.map((x, n) => { const m = memberById(x.member_id);
-      const prev = rk[n - 1], tie = prev && prev.points === x.points && prev.hits3 === x.hits3 && prev.doubles === x.doubles;
-      if (!tie) pos = n + 1;
-      return `<a class="item" href="#jugador/${x.member_id}"><span class="pos">${pos}</span>${avatar(m, 'sm')}<div class="grow"><div class="t">${esc(m?.name || '¿?')}</div>
-        <div class="s">${plural(+x.hits3, 'pleno', 'plenos')} · ${plural(+x.hits1, 'doble acertado', 'dobles acertados')} · ${plural(+x.rounds, 'jornada', 'jornadas')}</div></div><span class="v">${x.points}</span></a>`; }).join('')}</div>
-    <p class="label" style="padding:14px var(--gut)">Empate a puntos: gana quien tenga más plenos (signo único acertado) y, después, quien haya usado menos dobles.</p>`;
-}
-
-/* ── Nuestros partidos ── */
-function ligaMatches(box) {
-  const L = S.liga, club = L.comp.club_name;
-  const rows = L.rounds.map(r => ({ r, f: fixturesOf(r.id).find(f => f.ours) }));
-  const next = rows.find(x => x.f && x.f.home_goals == null && !x.f.void && x.r.match_date >= todayISO());
-  const view = f => {
-    const home = f.home === club, rival = home ? f.away : f.home;
-    const gf = home ? f.home_goals : f.away_goals, ga = home ? f.away_goals : f.home_goals;
-    return { home, rival, res: f.home_goals == null ? null : { gf, ga, k: gf > ga ? 'Victoria' : gf < ga ? 'Derrota' : 'Empate' } };
-  };
-  let hero = '';
-  if (next) {
-    const v = view(next.f);
-    hero = `<section class="block" style="margin-top:16px"><div class="meta">${icon('arrow-right')}<span>Próximo partido</span><span>Jornada ${next.r.num}</span></div>
-      <div class="rival">${esc(teamName(v.rival))}</div>
-      <div class="facts"><span>${v.home ? 'En casa' : 'Fuera'}</span><span>${esc(next.f.kickoff ? fmtKick(next.f.kickoff) : fmtRoundDay(next.r.match_date))}</span></div></section>`;
+/* ── Ranking: total o por jornada (solo jornadas cerradas) ── */
+function quinielaRanking(box) {
+  const L = S.liga, rounds = closedRounds().reverse();
+  if (!rounds.length) return box.innerHTML = `<div class="empty"><b>0 pts</b>El ranking empieza cuando se cierre la primera jornada, el domingo a las 22:00.</div>`;
+  const sel = roundById(L.rankRound);
+  const picker = `<div style="padding:16px var(--gut) 0"><select class="input" id="rk-round" aria-label="Jornada">
+      <option value="">Total</option>${rounds.map(r => `<option value="${r.id}" ${r.id === L.rankRound ? 'selected' : ''}>Jornada ${r.num} · ${fmtRoundDay(r.match_date)}</option>`).join('')}</select></div>`;
+  const rk = [...L.ranking].sort((a, b) => b.points - a.points || b.hits3 - a.hits3 || a.doubles - b.doubles);
+  let body;
+  if (!rk.length) body = `<div class="empty">Nadie entregó la quiniela ${sel ? 'de esta jornada' : 'todavía'}.</div>`;
+  else {
+    const lead = rk[0], same = (a, b) => a.points === b.points && a.hits3 === b.hits3 && a.doubles === b.doubles;
+    const top = rk.filter(x => same(x, lead)).map(x => firstName(memberById(x.member_id)) || '¿?');
+    const title = sel ? (top.length > 1 ? `Empate en la jornada ${sel.num}` : `Ganador de la jornada ${sel.num}`) : top.length > 1 ? 'Líderes' : 'Líder';
+    let pos = 0;
+    body = `<section class="block" style="margin-top:16px">
+        <div class="meta">${icon('trophy')}<span>${title}</span><span>${sel ? fmtRoundDay(sel.match_date) : plural(rounds.length, 'jornada', 'jornadas')}</span></div>
+        <div class="amount big">${lead.points}<small>pts</small></div>
+        <div class="facts"><span>${esc(top.join(', '))}</span><span>${plural(+lead.hits, 'acierto', 'aciertos')}</span></div></section>
+      <div class="list">${rk.map((x, n) => { const m = memberById(x.member_id);
+        if (!rk[n - 1] || !same(rk[n - 1], x)) pos = n + 1;
+        return `<a class="item" href="#jugador/${x.member_id}"><span class="pos">${pos}</span>${avatar(m, 'sm')}<div class="grow"><div class="t">${esc(m?.name || '¿?')}</div>
+          <div class="s">${plural(+x.hits, 'acierto', 'aciertos')} · ${plural(+x.hits3, 'pleno', 'plenos')}${sel ? '' : ` · ${plural(+x.rounds, 'jornada', 'jornadas')}`}</div></div><span class="v">${x.points}</span></a>`; }).join('')}</div>`;
   }
-  const played = rows.filter(x => x.f && x.f.home_goals != null).map(x => view(x.f).res);
-  const cnt = k => played.filter(x => x.k === k).length;
-  box.innerHTML = hero + `<div class="nums" style="margin-top:${hero ? 0 : 16}px"><div><span class="label">Ganados</span><b>${cnt('Victoria')}</b></div><div><span class="label">Empatados</span><b>${cnt('Empate')}</b></div><div><span class="label">Perdidos</span><b>${cnt('Derrota')}</b></div></div>
-    ${rowLabel('Calendario', plural(L.rounds.length, 'jornada', 'jornadas'))}
-    <div class="list">${rows.map(({ r, f }) => {
-      if (!f) return `<div class="item"><span class="pos">${r.num}</span><div class="grow"><div class="t mute">Descansamos</div><div class="s">${fmtRoundDay(r.match_date)}</div></div></div>`;
-      const v = view(f);
-      return `<div class="item" data-fx="${f.id}"><span class="pos">${r.num}</span><div class="grow"><div class="t">${v.home ? 'vs' : 'en'} ${esc(teamName(v.rival))}</div>
-        <div class="s">${esc(f.kickoff ? fmtKick(f.kickoff) : fmtRoundDay(r.match_date))} · ${v.home ? 'casa' : 'fuera'}${f.status === 'postponed' ? ' · aplazado' : ''}</div></div>
-        ${v.res ? `<span class="tag ${v.res.k === 'Victoria' ? 'acc' : v.res.k === 'Derrota' ? 'solid' : ''}">${v.res.k[0]}</span><span class="v">${v.res.gf}–${v.res.ga}</span>` : ''}</div>`; }).join('')}</div>
-    ${S.me.is_admin ? `<div class="btns"><button class="btn line" id="sync">${icon('sync')}Actualizar desde la federación</button></div>` : ''}
-    <p class="label" style="padding:12px var(--gut)">${L.comp.synced_at ? `Resultados de ffcm.es · actualizado ${ago(L.comp.synced_at)}` : 'Resultados de ffcm.es · se actualizan cada noche'}</p>`;
-  if (S.me.is_admin) {
-    $$('[data-fx]', box).forEach(b => b.onclick = () => fixtureSheet(L.fixtures.find(f => f.id === +b.dataset.fx)));
-    $('#sync', box).onclick = syncFederation;
-  }
-}
-
-/* ── Clasificación (calculada con los resultados que tiene la app) ── */
-function ligaTable(box) {
-  const L = S.liga, T = new Map();
-  const row = n => T.get(n) || T.set(n, { n, pj: 0, g: 0, e: 0, p: 0, gf: 0, gc: 0, pts: 0 }).get(n);
-  L.fixtures.forEach(f => {
-    const h = row(f.home), a = row(f.away);
-    if (f.home_goals == null) return;
-    [[h, f.home_goals, f.away_goals], [a, f.away_goals, f.home_goals]].forEach(([t, gf, gc]) => {
-      t.pj++; t.gf += gf; t.gc += gc;
-      if (gf > gc) { t.g++; t.pts += 3; } else if (gf === gc) { t.e++; t.pts++; } else t.p++;
-    });
-  });
-  const list = [...T.values()].sort((a, b) => b.pts - a.pts || (b.gf - b.gc) - (a.gf - a.gc) || b.gf - a.gf || teamName(a.n).localeCompare(teamName(b.n), 'es'));
-  box.innerHTML = `<div class="stand" style="margin-top:16px"><div class="st head"><span>#</span><span>Equipo</span><span>PJ</span><span>G</span><span>E</span><span>P</span><span>DG</span><span>Pts</span></div>
-    ${list.map((t, n) => `<div class="st ${t.n === L.comp.club_name ? 'me' : ''}"><span>${n + 1}</span><span class="nm">${esc(teamName(t.n))}</span><span>${t.pj}</span><span>${t.g}</span><span>${t.e}</span><span>${t.p}</span><span>${t.gf - t.gc > 0 ? '+' : ''}${t.gf - t.gc}</span><b>${t.pts}</b></div>`).join('')}</div>
-    <p class="label" style="padding:14px var(--gut)">Calculada con los resultados de la app. Con empate a puntos se ordena por diferencia de goles; la oficial de la federación puede usar otros criterios.</p>`;
+  box.innerHTML = picker + body + `<p class="label" style="padding:14px var(--gut)">Signo acertado: 3 puntos; doble acertado: 1. Empate a puntos: gana quien tenga más plenos (signo único acertado) y, después, quien haya usado menos dobles.</p>`;
+  $('#rk-round', box).onchange = e => { L.rankRound = e.target.value ? +e.target.value : null; refresh(); };
 }
 
 /* ── Admin: corregir un resultado o anular un partido ── */
@@ -1021,17 +982,6 @@ function fixtureSheet(f) {
   };
   $('#fx-save', sh).onclick = () => save(true);
   $('#fx-auto', sh)?.addEventListener('click', () => save(false));
-}
-
-async function syncFederation(e) {
-  const b = e.currentTarget; b.disabled = true;
-  const { data, error } = await sb.functions.invoke('ffcm-sync');
-  b.disabled = false;
-  if (error) return toast('No se pudo leer la federación. Inténtalo más tarde.');
-  const rep = Array.isArray(data) ? data : [];
-  const up = rep.reduce((s, x) => s + (x.updated || 0), 0), miss = rep.reduce((s, x) => s + (x.missing?.length || 0), 0);
-  toast(`${plural(up, 'partido actualizado', 'partidos actualizados')}${miss ? ` · ${miss} sin encontrar en la web` : ''}`);
-  S.liga.loaded = null; await loadLiga(); refresh();
 }
 
 /* ════════════════════════════════════════════════
