@@ -2,6 +2,9 @@
 //  · La llama pg_cron cada noche (cabecera x-notify-secret) y un admin desde la app (su JWT).
 //  · Después cierra las jornadas viejas y pide a «notify» el push con los puntos de la quiniela.
 //  · ?debug=<jornada> devuelve el texto que se ha extraído de la página, para ajustar el lector.
+//  · ffcm.es devuelve páginas vacías a los servidores de Supabase, así que las descarga un GitHub Action
+//    (scripts/ffcm_fetch.mjs): pide { action: "plan" } → lista de URLs, las descarga y las manda en
+//    { action: "ingest", pages: { url: html } }. Sin «pages», la función intenta descargarlas ella misma.
 // Los partidos ya existen (los carga scripts/calendario_pdf.py): aquí solo se buscan por nombre de equipo,
 // así que da igual cómo pinte la federación la tabla mientras local y visitante salgan en la misma fila.
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -103,6 +106,17 @@ Deno.serve(async (req) => {
     if (!byCron && !(await isAdmin(req))) return json({ error: "forbidden" }, 403);
 
     const debug = new URL(req.url).searchParams.get("debug");
+    const input = req.method === "POST" ? await req.json().catch(() => ({})) : {};
+    // plan: solo se apuntan las URLs; ingest: se usan las páginas que manda el GitHub Action.
+    const planned: string[] | null = input.action === "plan" ? [] : null;
+    const supplied: Record<string, string> | null = input.action === "ingest" && input.pages && typeof input.pages === "object" ? input.pages : null;
+    let gotContent = false;   // solo se marca como actualizado si alguna página traía algo
+    const getPage = async (url: string) => {
+      if (planned) { planned.push(url); return ""; }
+      const html = supplied ? String(supplied[url] ?? "") : await fetchText(url);
+      if (html.trim()) gotContent = true;
+      return html;
+    };
     const soon = new Date(Date.now() + 8 * 864e5).toLocaleDateString("sv-SE", { timeZone: "Europe/Madrid" });
     const { data: comps, error } = await db.from("competitions").select("*").not("ffcm_competicion", "is", null);
     if (error) throw error;
@@ -112,7 +126,7 @@ Deno.serve(async (req) => {
       if (debug) {
         const out = [];
         for (const url of pages(c, +debug)) {
-          try { out.push({ url, lines: lines(await fetchText(url)) }); } catch (e) { out.push({ url, error: String(e) }); }
+          try { out.push({ url, lines: lines(await getPage(url)) }); } catch (e) { out.push({ url, error: String(e) }); }
         }
         report.push({ competition: c.id, pages: out });
         continue;
@@ -131,9 +145,9 @@ Deno.serve(async (req) => {
         const res: Record<number, ReturnType<typeof find>> = {};
         const errors: string[] = [];
         for (const url of pages(c, r.num)) {
-          if (want.every((f) => res[f.id]?.score || res[f.id]?.postponed)) break;
+          if (!planned && want.every((f) => res[f.id]?.score || res[f.id]?.postponed)) break;
           try {
-            const ls = lines(await fetchText(url));
+            const ls = lines(await getPage(url));
             for (const f of want) { const hit = find(ls, f); if (hit && (!res[f.id] || hit.score || hit.postponed)) res[f.id] = { ...hit, kickoff: hit.kickoff || res[f.id]?.kickoff || null }; }
           } catch (e) { errors.push(String(e)); }
         }
@@ -152,9 +166,12 @@ Deno.serve(async (req) => {
         report.push({ round: r.num, wanted: want.length, found: Object.keys(res).length, updated,
           missing: want.filter((f) => !res[f.id]).map((f) => `${f.home} - ${f.away}`), errors });
       }
-      await db.from("competitions").update({ synced_at: new Date().toISOString() }).eq("id", c.id);
+      if (gotContent) {
+        await db.from("competitions").update({ synced_at: new Date().toISOString() }).eq("id", c.id);
+      }
     }
     if (debug) return json(report);
+    if (planned) return json({ urls: [...new Set(planned)] });
 
     await db.rpc("close_rounds");
     // Push con los puntos: la primera sincronización después del día de la jornada (la noche del domingo).
