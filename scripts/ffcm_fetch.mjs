@@ -68,11 +68,12 @@ async function call(body) {
 if (process.argv.includes('--probe') || !SYNC_SECRET) {
   const html = await get(PROBE);
   console.log(`ffcm.es: ${html.length} caracteres · cookies: ${[...jar.keys()].join(', ') || 'ninguna'}`);
-  const at = html.indexOf('Jornada 1 (');
-  console.log('--- HTML de la jornada 1 ---');
-  console.log(at < 0 ? (html || lastRaw).slice(0, 3000) : html.slice(at, at + 5000));
-  console.log('--- Enlaces NFG_ ---');
-  console.log([...new Set([...html.matchAll(/href=["']?([^"' >]*NFG_[^"' >]*)/gi)].map(m => m[1].replace(/&amp;/g, '&')))].slice(0, 60).join('\n'));
+  const snippet = h => { const at = h.indexOf('AUTOCARES RIVILLA'); return at < 0 ? '(no aparece el primer partido)' : h.slice(Math.max(0, at - 1500), at + 3500); };
+  console.log('--- Calendario: HTML alrededor del primer partido ---');
+  console.log(snippet(html));
+  const res = await get(PROBE.replace('NFG_VisCalendario_Vis', 'NFG_CmpJornada'));
+  console.log(`--- Resultados (NFG_CmpJornada): ${res.length} caracteres ---`);
+  console.log(snippet(res));
   if (!html.length) { console.error('ffcm.es ha devuelto una página vacía: también bloquea esta máquina.'); process.exit(1); }
   process.exit(0);
 }
