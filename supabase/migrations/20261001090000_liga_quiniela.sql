@@ -10,6 +10,7 @@
 -- ════════════════════════════════════════════════════════════════
 
 -- ── Tablas ──────────────────────────────────────────────────────
+-- RLS se activa justo después de cada tabla (las políticas van más abajo).
 
 create table public.competitions (
   id               uuid primary key default gen_random_uuid(),
@@ -23,6 +24,7 @@ create table public.competitions (
   synced_at        timestamptz,
   created_at       timestamptz not null default now()
 );
+alter table public.competitions enable row level security;
 
 create table public.rounds (
   id             bigint generated always as identity primary key,
@@ -34,6 +36,7 @@ create table public.rounds (
   notified_at    timestamptz,            -- push de resultados enviada
   unique (competition_id, num)
 );
+alter table public.rounds enable row level security;
 
 create table public.fixtures (
   id         bigint generated always as identity primary key,
@@ -52,6 +55,7 @@ create table public.fixtures (
   check ((home_goals is null) = (away_goals is null))
 );
 create index fixtures_round_idx on public.fixtures(round_id);
+alter table public.fixtures enable row level security;
 
 create table public.picks (
   fixture_id bigint not null references public.fixtures(id) on delete cascade,
@@ -63,6 +67,7 @@ create table public.picks (
   primary key (fixture_id, member_id)
 );
 create index picks_round_idx on public.picks(round_id, member_id);
+alter table public.picks enable row level security;
 
 -- ── Triggers ────────────────────────────────────────────────────
 
@@ -113,10 +118,6 @@ create view public.pick_points with (security_invoker = true) as
 
 -- ── RLS ─────────────────────────────────────────────────────────
 
-alter table public.competitions enable row level security;
-alter table public.rounds       enable row level security;
-alter table public.fixtures     enable row level security;
-alter table public.picks        enable row level security;
 revoke all on public.competitions, public.rounds, public.fixtures, public.picks, public.pick_points from anon, authenticated;
 grant select on public.competitions, public.rounds, public.fixtures, public.picks, public.pick_points to authenticated;
 
