@@ -20,11 +20,12 @@ type Fixture = { id: number; round_id: number; home: string; away: string; kicko
 
 const norm = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toUpperCase().replace(/\s+/g, " ").trim();
 
-// Páginas de la federación: primero la de resultados de la jornada y, si falta algo, la del calendario.
-const pages = (c: Comp, num: number) => {
-  const q = `cod_primaria=${PRIMARIA}&CodCompeticion=${c.ffcm_competicion}&CodGrupo=${c.ffcm_grupo}&CodTemporada=${c.ffcm_temporada}&CodJornada=${num}`;
-  return [`${FFCM}/NFG_CmpJornada?${q}`, `${FFCM}/NFG_VisCalendario_Vis?${q.toLowerCase().replace("codjornada", "CodJornada")}`];
-};
+// Páginas de la federación: el calendario (toda la temporada con resultados, una sola página) y,
+// si falta algo, la de resultados de la jornada.
+const pages = (c: Comp, num: number) => [
+  `${FFCM}/NFG_VisCalendario_Vis?cod_primaria=${PRIMARIA}&codtemporada=${c.ffcm_temporada}&codcompeticion=${c.ffcm_competicion}&codgrupo=${c.ffcm_grupo}&CodJornada=1`,
+  `${FFCM}/NFG_CmpJornada?cod_primaria=${PRIMARIA}&CodTemporada=${c.ffcm_temporada}&CodGrupo=${c.ffcm_grupo}&CodCompeticion=${c.ffcm_competicion}&CodJornada=${num}`,
+];
 
 async function fetchText(url: string) {
   const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/126 Mobile Safari/537.36", "Accept-Language": "es-ES,es" } });
@@ -39,6 +40,7 @@ async function fetchText(url: string) {
 function lines(html: string) {
   return html
     .replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<i[^>]*fa-minus[^>]*>/gi, " - ")   // el guion entre los goles es un icono
     .replace(/<\/(tr|p|div|li|h\d|table|thead|tbody)>|<br\s*\/?>/gi, "\n")
     .replace(/<\/t[dh]>/gi, " | ")
     .replace(/<[^>]+>/g, " ")
@@ -111,9 +113,11 @@ Deno.serve(async (req) => {
     const planned: string[] | null = input.action === "plan" ? [] : null;
     const supplied: Record<string, string> | null = input.action === "ingest" && input.pages && typeof input.pages === "object" ? input.pages : null;
     let gotContent = false;   // solo se marca como actualizado si alguna página traía algo
+    const cache = new Map<string, Promise<string>>();   // el calendario sirve para todas las jornadas
     const getPage = async (url: string) => {
       if (planned) { planned.push(url); return ""; }
-      const html = supplied ? String(supplied[url] ?? "") : await fetchText(url);
+      if (!cache.has(url)) cache.set(url, supplied ? Promise.resolve(String(supplied[url] ?? "")) : fetchText(url));
+      const html = await cache.get(url)!;
       if (html.trim()) gotContent = true;
       return html;
     };

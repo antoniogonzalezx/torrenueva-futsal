@@ -98,10 +98,16 @@ publicaciones a 1280 px. El bucket `media` acepta solo WebP/JPEG de hasta 1,5 MB
 
 - `scripts/calendario_pdf.py` convierte el PDF de calendario de ffcm.es en SQL (competición, jornadas y partidos).
   Los códigos `codtemporada`, `codcompeticion` y `codgrupo` salen de la URL del calendario en la web.
-- `ffcm-sync` se ejecuta cada noche (`pg_cron`, 21:30 UTC): lee la página de la jornada en ffcm.es, busca cada
-  partido por el nombre de los equipos y guarda resultado, hora o aplazamiento. Un admin también puede lanzarla
-  desde la app (Liga → Partidos). Con `?debug=<jornada>` devuelve el texto que extrae de la web, para ajustar el
-  lector si la federación cambia la página.
+- `ffcm-sync` procesa el calendario de ffcm.es (una sola página con toda la temporada y sus resultados): busca cada
+  partido por el nombre de los equipos y guarda resultado o aplazamiento. Con `?debug=<jornada>` devuelve el texto
+  que extrae de la web, para ajustar el lector si la federación cambia la página.
+- ffcm.es devuelve páginas vacías a los servidores de Supabase, así que las descarga GitHub: el workflow
+  `.github/workflows/ffcm-sync.yml` (cada noche, 20:45 UTC) ejecuta `scripts/ffcm_fetch.mjs`, que pide a `ffcm-sync`
+  qué páginas necesita, las descarga (abriendo sesión en la web, que exige cookie) y se las manda. Necesita el
+  secreto de repositorio `FFCM_SYNC_SECRET` con el valor de `webhook_secret` de `app_secrets`. Se puede lanzar a
+  mano desde Actions → Resultados ffcm.es → Run workflow.
+- `pg_cron` llama también a `ffcm-sync` cada noche (21:30 UTC) para cerrar jornadas y mandar el push de puntos
+  aunque los resultados se hayan puesto a mano.
 - `close_rounds()` (`pg_cron`, cada mañana) anula lo que siga sin resultado tres días después de la jornada.
 - En iOS solo funcionan con la app instalada en la pantalla de inicio (iOS 16.4 o superior).
 
