@@ -767,7 +767,7 @@ function viewHistory(view) {
    ════════════════════════════════════════════════ */
 const SIGNS = ['1', 'X', '2'];
 const MAX_DOUBLES = 4;
-const Q_TABS = [['jornada', 'Jornada'], ['ranking', 'Ranking']];
+const Q_TABS = [['jornada', 'Jornada'], ['ranking', 'Clasificación']];
 const TZ = { timeZone: 'Europe/Madrid' };
 const fmtRoundDay = iso => new Date(iso + 'T12:00:00').toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' });
 const fmtKick = iso => new Date(iso).toLocaleString('es-ES', { ...TZ, weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -930,10 +930,10 @@ function quinielaLive(r, bet) {
       : `<div class="empty">Nadie entregó la quiniela de esta jornada.</div>`}`;
 }
 
-/* ── Ranking: total o por jornada (solo jornadas cerradas) ── */
+/* ── Clasificación de la quiniela: total o por jornada (solo jornadas cerradas) ── */
 function quinielaRanking(box) {
   const L = S.liga, rounds = closedRounds().reverse();
-  if (!rounds.length) return box.innerHTML = `<div class="empty"><b>0 pts</b>El ranking empieza cuando se cierre la primera jornada, el domingo a las 22:00.</div>`;
+  if (!rounds.length) return box.innerHTML = `<div class="empty"><b>0 pts</b>La clasificación empieza cuando se cierre la primera jornada, el domingo a las 22:00.</div>`;
   const sel = roundById(L.rankRound);
   const picker = `<div style="padding:16px var(--gut) 0"><select class="input" id="rk-round" aria-label="Jornada">
       <option value="">Total</option>${rounds.map(r => `<option value="${r.id}" ${r.id === L.rankRound ? 'selected' : ''}>Jornada ${r.num} · ${fmtRoundDay(r.match_date)}</option>`).join('')}</select></div>`;
