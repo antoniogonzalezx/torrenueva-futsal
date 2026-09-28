@@ -5,8 +5,11 @@
 name: Resultados ffcm.es
 
 on:
+  # Domingos a las 22:00 de Madrid. GitHub programa en UTC: 20:00 UTC en verano y 21:00 UTC en invierno.
+  # Se programan las dos y el script solo sigue en la que corresponde (ver SCHEDULE).
   schedule:
-    - cron: '45 20 * * *'   # cada noche: 22:45 en verano / 21:45 en invierno (hora de Madrid)
+    - cron: '0 20 * * 0'
+    - cron: '0 21 * * 0'
   workflow_dispatch:
   push:                      # prueba de conexión (--probe) al tocar el workflow o el script en una rama de trabajo
     branches: ['claude/**']
@@ -25,3 +28,4 @@ jobs:
         env:
           SUPABASE_URL: https://cmfhosxslodnrxlpifrn.supabase.co
           SYNC_SECRET: ${{ secrets.FFCM_SYNC_SECRET }}
+          SCHEDULE: ${{ github.event.schedule }}

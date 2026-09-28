@@ -43,15 +43,15 @@ Todas las rutas son relativas, así que funciona tanto en la raíz de un dominio
 - **Plantilla y ficha**: foto, dorsal, posición y estadísticas de fútbol sala; los porteros tienen además paradas,
   goles encajados y porterías a cero.
 - **Historial**: recaudación, ranking y movimientos de saldo.
-- **Liga** (solo equipos con competición): calendario y resultados de la federación, clasificación y quiniela.
-  - Quiniela de cada jornada con todos los partidos del grupo menos el nuestro. Signo único acertado: 3 puntos;
+- **Quiniela** (solo equipos con competición): pestaña con dos apartados.
+  - *Jornada*: la jornada abierta, con todos los partidos del grupo menos el nuestro. Signo único acertado: 3 puntos;
     doble acertado: 1 punto; máximo 4 dobles. Se entrega entera y se puede cambiar hasta el viernes a las 14:00
-    (hora de Madrid). Los pronósticos de los demás se ven después del cierre.
-  - Partido aplazado o suspendido: anulado (0 puntos para todos). Tres días después de la jornada, lo que siga
-    sin resultado también se anula. Cuenta el resultado oficial de la federación.
-  - Ranking general; empate: más plenos y, después, menos dobles usados.
-  - Los admins pueden corregir un resultado o anular un partido a mano (la sincronización deja de tocarlo).
-- **Notificaciones push** (Web Push/VAPID): actividad del feed y un recordatorio diario de multas a punto de duplicarse.
+    (hora de Madrid); después se ven los pronósticos de todos.
+  - *Ranking*: total o por jornada (desplegable con las jornadas cerradas).
+  - Solo hay una jornada abierta. El domingo a las 22:00 se leen los resultados, se cierra (lo que siga sin
+    resultado, como un aplazado, se anula) y se abre la siguiente. Cuenta el resultado oficial de la federación.
+  - Empate en el ranking: más plenos y, después, menos dobles usados.
+  - Los admins pueden corregir un resultado o anular un partido tocándolo (la sincronización deja de tocarlo).
 
 ## Backend
 
@@ -92,24 +92,22 @@ publicaciones a 1280 px. El bucket `media` acepta solo WebP/JPEG de hasta 1,5 MB
 - `pg_cron` la llama cada día con `{ "type": "reminders" }` para avisar de las multas que se duplican en 2 días.
 - Quiniela: `pg_cron` avisa el jueves por la tarde y el viernes por la mañana a quien no la ha entregado
   (`{ "type": "quiniela_reminder" }`), y `ffcm-sync` pide el push con los puntos de la jornada (`quiniela_results`)
-  la primera noche después de jugarse.
+  al cerrar la jornada, el domingo a las 22:00.
 
-### Liga y resultados
+### Quiniela y resultados
 
 - `scripts/calendario_pdf.py` convierte el PDF de calendario de ffcm.es en SQL (competición, jornadas y partidos).
   Los códigos `codtemporada`, `codcompeticion` y `codgrupo` salen de la URL del calendario en la web.
-- `ffcm-sync` procesa el calendario de ffcm.es (una sola página con toda la temporada y sus resultados): busca cada
-  partido por el nombre de los equipos y guarda resultado o aplazamiento. Con `?debug=<jornada>` devuelve el texto
-  que extrae de la web, para ajustar el lector si la federación cambia la página.
 - ffcm.es devuelve páginas vacías a los servidores de Supabase, así que las descarga GitHub: el workflow
-  `.github/workflows/ffcm-sync.yml` (cada noche, 20:45 UTC) ejecuta `scripts/ffcm_fetch.mjs`, que pide a `ffcm-sync`
-  qué páginas necesita, las descarga (abriendo sesión en la web, que exige cookie) y se las manda. Necesita el
-  secreto de repositorio `FFCM_SYNC_SECRET` con el valor de `webhook_secret` de `app_secrets`. Se puede lanzar a
-  mano desde Actions → Resultados ffcm.es → Run workflow.
-- `pg_cron` llama también a `ffcm-sync` cada noche (21:30 UTC) para cerrar jornadas y mandar el push de puntos
-  aunque los resultados se hayan puesto a mano.
-- `close_rounds()` (`pg_cron`, cada mañana) anula lo que siga sin resultado tres días después de la jornada.
-- En iOS solo funcionan con la app instalada en la pantalla de inicio (iOS 16.4 o superior).
+  `.github/workflows/ffcm-sync.yml` se ejecuta los domingos a las 22:00 de Madrid (programado a las 20:00 y 21:00 UTC;
+  el script solo sigue en la que toca según el horario de verano o invierno). `scripts/ffcm_fetch.mjs` pide a
+  `ffcm-sync` qué páginas necesita, las descarga (abriendo sesión en la web, que exige cookie) y se las manda.
+  Necesita el secreto de repositorio `FFCM_SYNC_SECRET` (valor de `webhook_secret` en `app_secrets`). También se
+  puede lanzar a mano: Actions → Resultados ffcm.es → Run workflow.
+- `ffcm-sync` busca cada partido por el nombre de los equipos en el calendario (toda la temporada en una página),
+  guarda los resultados, cierra la jornada (`close_rounds()`) y pide a `notify` el push con los puntos.
+  Con `?debug=<jornada>` devuelve el texto que extrae de la web.
+- Respaldo: si el domingo falla, `pg_cron` cierra la jornada el lunes a las 06:00 UTC y manda el push.
 
 ## Puesta en marcha
 

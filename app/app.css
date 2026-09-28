@@ -250,12 +250,10 @@ select.input{background:var(--paper) url("data:image/svg+xml,%3Csvg xmlns='http:
 .team .ic{margin-left:auto}
 
 /* ── Liga y quiniela ───────────────────────────────────── */
-.rnav{display:flex;align-items:center;justify-content:space-between;padding:14px calc(var(--gut) - 10px) 12px}
+.rnav{display:flex;justify-content:center;padding:14px var(--gut) 12px}
 .rnav div{text-align:center}
 .rnav b{display:block;font-size:20px;font-weight:800;letter-spacing:-.035em}
 .rnav span{font-size:13px;color:var(--mute)}
-.rnav .next .ic{transform:rotate(180deg)}
-.rnav button:disabled{opacity:.25}
 .fx{display:flex;align-items:center;gap:12px;padding:12px var(--gut);border-bottom:1px solid var(--line)}
 .fx.ours{background:var(--fill)}
 .fx-n{width:16px;flex-shrink:0;font-size:13px;font-weight:700;color:var(--mute)}
@@ -284,9 +282,3 @@ i.miss{color:var(--mute-2);text-decoration:line-through}
 .who span:not(.in) .av{opacity:.4}
 .who .av{--s:24px}
 .pos{width:22px;flex-shrink:0;text-align:center;font-size:15px;font-weight:800}
-.block .rival{font-size:44px;font-weight:800;letter-spacing:-.05em;line-height:.95;margin:28px 0 14px;overflow-wrap:anywhere}
-.stand .st{display:grid;grid-template-columns:20px minmax(0,1fr) repeat(5,26px) 30px;gap:4px;align-items:center;padding:11px var(--gut);border-bottom:1px solid var(--line);font-size:14px;text-align:center}
-.stand .st.head{border-top:1px solid var(--line);font-size:12px;font-weight:600;color:var(--mute)}
-.stand .st .nm{text-align:left;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.stand .st.me{background:var(--accent)}
-.stand b{font-weight:800}

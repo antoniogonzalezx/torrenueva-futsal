@@ -2,7 +2,7 @@
 //  · actividad del feed: la llama la base de datos (pg_net) desde triggers en posts, post_comments y post_likes;
 //  · recordatorio de multas a punto de duplicarse: la llama pg_cron cada mañana con { type: "reminders" };
 //  · quiniela: recordatorio a quien no la ha rellenado ({ type: "quiniela_reminder" }, pg_cron jueves y viernes)
-//    y puntos de la jornada ({ type: "quiniela_results" }, la llama ffcm-sync después de leer los resultados).
+//    y puntos de la jornada ({ type: "quiniela_results" }, la llama ffcm-sync al cerrar la jornada el domingo).
 // Las claves VAPID y el secreto del webhook viven en public.app_secrets (sin acceso para anon/authenticated).
 import { createClient } from "npm:@supabase/supabase-js@2";
 import webpush from "npm:web-push@3.6.7";
@@ -76,7 +76,7 @@ async function pushTo(memberIds: string[], payload: (memberId: string) => string
 async function quinielaReminder() {
   const now = new Date();
   const { data: rounds } = await db.from("rounds").select("id,num,deadline,competitions(team_id)")
-    .gt("deadline", now.toISOString()).lt("deadline", new Date(+now + 30 * 36e5).toISOString());
+    .eq("closed", false).gt("deadline", now.toISOString()).lt("deadline", new Date(+now + 30 * 36e5).toISOString());
   let sent = 0;
   for (const r of rounds || []) {
     const teamId = (r.competitions as unknown as { team_id: string }).team_id;
@@ -88,7 +88,7 @@ async function quinielaReminder() {
     const missing = (members || []).map((m) => m.id).filter((id) => !done.has(id));
     const today = new Date(r.deadline).toLocaleDateString("sv-SE", { timeZone: "Europe/Madrid" }) === madridDay();
     const payload = JSON.stringify({ title: `Quiniela · jornada ${r.num}`,
-      body: `Cierra ${today ? "hoy" : "mañana"} a las 14:00 y aún no la has rellenado.`, url: "#liga", tag: `quiniela-${r.id}` });
+      body: `Cierra ${today ? "hoy" : "mañana"} a las 14:00 y aún no la has rellenado.`, url: "#quiniela", tag: `quiniela-${r.id}` });
     sent += await pushTo(missing, () => payload);
   }
   return new Response(String(sent));
@@ -122,7 +122,7 @@ async function quinielaResults() {
     sent += await pushTo((members || []).map((m) => m.id), (id) => {
       const me = tot.get(id);
       const body = (me ? `Has sacado ${pts(me.p)} (${me.hits} acierto${me.hits === 1 ? "" : "s"}). ` : "") + lead + left;
-      return JSON.stringify({ title: `Quiniela · resultados de la jornada ${r.num}`, body, url: "#liga", tag: `quiniela-${r.id}` });
+      return JSON.stringify({ title: `Quiniela · resultados de la jornada ${r.num}`, body, url: "#quiniela", tag: `quiniela-${r.id}` });
     });
     await db.from("rounds").update({ notified_at: new Date().toISOString() }).eq("id", r.id);
   }

@@ -75,6 +75,17 @@ if (process.argv.includes('--probe') || !SYNC_SECRET) {
   process.exit(0);
 }
 
+// Programado dos veces (20:00 y 21:00 UTC): solo sigue la que cae a las 22:00 en Madrid (verano UTC+2, invierno UTC+1).
+// Se decide por la programación y no por la hora actual porque GitHub puede retrasar la ejecución.
+const { SCHEDULE } = process.env;
+if (SCHEDULE) {
+  const now = new Date();
+  const hourMadrid = +new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Madrid', hour: '2-digit', hourCycle: 'h23' }).format(now);
+  const summer = (hourMadrid - now.getUTCHours() + 24) % 24 === 2;
+  const expected = summer ? '0 20 * * 0' : '0 21 * * 0';
+  if (SCHEDULE !== expected) { console.log(`Programación ${SCHEDULE}: no toca (${summer ? 'horario de verano' : 'horario de invierno'}).`); process.exit(0); }
+}
+
 const { urls } = await call({ action: 'plan' });
 const pages = {};
 for (const url of urls) {
