@@ -12,18 +12,23 @@ const HEADERS = {
 const { SUPABASE_URL, SYNC_SECRET } = process.env;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// La web abre sesión (JSESSIONID) en la primera visita: si la página llega vacía, se repite con la cookie.
-let cookie = '';
+// La web abre sesión (JSESSIONID) en la primera visita y contesta «No se ha aceptado el cookie»
+// hasta que se vuelve con ella. Las cookies se guardan y se reenvían en todas las peticiones.
+const jar = new Map();
+let lastRaw = '';   // última respuesta tal cual, para la prueba de conexión
 async function get(url) {
-  for (let i = 0; i < 2; i++) {
+  let html = '';
+  for (let i = 0; i < 3; i++) {
+    const cookie = [...jar].map(([k, v]) => `${k}=${v}`).join('; ');
     const res = await fetch(url, { headers: { ...HEADERS, ...(cookie && { Cookie: cookie }) } });
     const set = res.headers.getSetCookie();
-    if (set.length) cookie = set.map(c => c.split(';')[0]).join('; ');
+    set.forEach(c => { const [kv] = c.split(';'), j = kv.indexOf('='); jar.set(kv.slice(0, j).trim(), kv.slice(j + 1).trim()); });
     if (!res.ok) throw new Error(`${res.status} ${url}`);
-    const buf = new Uint8Array(await res.arrayBuffer());
-    if (buf.length || !set.length) return decode(buf, res.headers.get('content-type'));
+    html = lastRaw = decode(new Uint8Array(await res.arrayBuffer()), res.headers.get('content-type'));
+    if (process.argv.includes('--probe')) console.log(`intento ${i + 1}: ${res.status}, ${html.length} caracteres, set-cookie: ${set.length}`);
+    if (html.trim() && !/no se ha aceptado (el|la) cookie/i.test(html)) return html;
   }
-  return '';
+  return /no se ha aceptado (el|la) cookie/i.test(html) ? '' : html;
 }
 function decode(buf, type) {
   const head = new TextDecoder('latin1').decode(buf.slice(0, 4096));
@@ -42,8 +47,10 @@ async function call(body) {
 
 if (process.argv.includes('--probe') || !SYNC_SECRET) {
   const html = await get(PROBE);
-  console.log(`ffcm.es: ${html.length} caracteres`);
+  console.log(`ffcm.es: ${html.length} caracteres · cookies: ${[...jar.keys()].join(', ') || 'ninguna'}`);
   console.log(text(html).slice(0, 2000));
+  console.log('--- HTML (inicio) ---');
+  console.log((html || lastRaw).slice(0, 3000));
   if (!html.length) { console.error('ffcm.es ha devuelto una página vacía: también bloquea esta máquina.'); process.exit(1); }
   process.exit(0);
 }
