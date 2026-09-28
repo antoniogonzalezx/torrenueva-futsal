@@ -92,7 +92,7 @@ publicaciones a 1280 px. El bucket `media` acepta solo WebP/JPEG de hasta 1,5 MB
 - `pg_cron` la llama cada día con `{ "type": "reminders" }` para avisar de las multas que se duplican en 2 días.
 - Quiniela: `pg_cron` avisa el jueves por la tarde y el viernes por la mañana a quien no la ha entregado
   (`{ "type": "quiniela_reminder" }`), y `ffcm-sync` pide el push con los puntos de la jornada (`quiniela_results`)
-  la primera noche después de jugarse.
+  al cerrar la jornada, el domingo a las 22:00.
 
 ### Quiniela y resultados
 
