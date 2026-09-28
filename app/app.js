@@ -164,9 +164,9 @@ async function renderAuth(mode = 'login') {
   closeSheet(true);
   $('#app').innerHTML = `<div class="auth">
     <section class="block">
-      <div class="meta">${icon('arrow-right')}<span>Torrenueva FS</span><span>${esc(TEAM.label)} · ${esc(TEAM.season)}</span></div>
-      <h1>Multas,<br>partidos<br>y equipo.</h1>
-      <p>Solo para la plantilla del ${esc(TEAM.label.toLowerCase())}.</p>
+      <h1>TORRENUEVA FS</h1>
+      <p class="auth-team">${esc(TEAM.label)}</p>
+      <p class="auth-season">${esc(TEAM.season)}</p>
     </section>
     <div class="inner">
       <div class="seg" role="group" aria-label="Acceso">
@@ -251,15 +251,21 @@ function paneSignup(roster) {
     if (pw !== $('#su-pw2').value) { err.textContent = 'Las contraseñas no coinciden.'; return; }
     btn.disabled = true;
     const fail = m => { err.textContent = m; btn.disabled = false; };
-    const chk = await sb.rpc('check_join', { p_member: sel, p_code: code });
-    if (chk.error) return fail(errMsg(chk.error));
-    if (chk.data === 'bad_code') return fail('El código del equipo no es correcto.');
-    if (chk.data === 'taken') return fail('Ese jugador ya tiene cuenta. Si eres tú, pide a un admin que la libere.');
-    if (chk.data !== 'ok') return fail('Ese jugador ya no está en la plantilla.');
-    const { data, error } = await sb.auth.signUp({ email: emailFor(sel), password: pw, options: { data: { member_id: sel, join_code: code } } });
-    if (error) return fail(/already/i.test(error.message) ? 'Ese jugador ya tiene cuenta.' : /password/i.test(error.message) ? 'Contraseña demasiado débil: usa al menos 6 caracteres.' : errMsg(error));
+    const { data, error } = await sb.functions.invoke('signup', { body: { member_id: sel, code, password: pw } });
+    if (error) {
+      let code = 'server';
+      try { code = (await error.context.json()).error || code; } catch {}
+      return fail({
+        bad_code: 'El código del equipo no es correcto.',
+        taken: 'Ese jugador ya tiene cuenta. Si eres tú, pide a un admin que la libere.',
+        not_found: 'Ese jugador ya no está en la plantilla.',
+        weak_password: 'La contraseña tiene que tener al menos 6 caracteres.',
+      }[code] || 'No se pudo crear la cuenta. Inténtalo de nuevo.');
+    }
+    if (!data?.ok) return fail('No se pudo crear la cuenta. Inténtalo de nuevo.');
+    const { error: e2 } = await sb.auth.signInWithPassword({ email: emailFor(sel), password: pw });
+    if (e2) return fail(errMsg(e2));
     store.set('last', sel);
-    if (!data.session) return fail('Cuenta creada, pero Supabase pide confirmar el email. Un admin debe desactivar «Confirm email» en Authentication → Sign In / Providers → Email.');
     await enterApp();
   };
 }
@@ -381,13 +387,14 @@ function header(title, { sub, back, action } = {}) {
   if (action) $('#h-act').onclick = action.fn;
   if (back) $('#h-back').onclick = () => history.length > 1 ? history.back() : (location.hash = 'plantilla');
 }
+const SUB = `${TEAM.label} · ${TEAM.season}`;
 const rowLabel = (a, b = '') => `<div class="rowlabel">${icon('arrow-right')}<span>${a}</span><span>${b}</span></div>`;
 
 /* ════════════════════════════════════════════════
    MULTAS
    ════════════════════════════════════════════════ */
 function viewFines(view) {
-  header('Multas', { sub: `${TEAM.label} · ${TEAM.season}`, action: { label: 'Nueva multa', fn: () => fineSheet() } });
+  header('Multas', { sub: SUB, action: { label: 'Nueva multa', fn: () => fineSheet() } });
   const pend = S.fines.filter(f => !f.paid);
   const total = pend.reduce((s, f) => s + due(f), 0);
   const groups = new Map();
@@ -512,7 +519,7 @@ function fineSheet(preset) {
    FEED
    ════════════════════════════════════════════════ */
 function viewFeed(view) {
-  header('Feed', { sub: 'Partidos y multas del equipo', action: { label: 'Publicar partido', fn: () => postSheet() } });
+  header('Feed', { sub: SUB, action: { label: 'Publicar partido', fn: () => postSheet() } });
   if (!S.posts.length) {
     view.innerHTML = `<div class="empty"><b>Nada aún</b>Publica tu primer partido con el botón +. Las multas nuevas también salen aquí.</div>`;
     return;
@@ -695,7 +702,7 @@ function bindSteppers(root, vals) {
    HISTORIAL
    ════════════════════════════════════════════════ */
 function viewHistory(view) {
-  header('Historial', { sub: 'Temporada ' + TEAM.season });
+  header('Historial', { sub: SUB });
   const paid = S.fines.filter(f => f.paid).sort((a, b) => (b.paid_at || '').localeCompare(a.paid_at || ''));
   const season = paid.filter(f => (f.paid_at || '') >= SEASON_START);
   const sum = arr => arr.reduce((s, f) => s + (+f.paid_total || 0), 0);
@@ -745,7 +752,7 @@ const POSITIONS = ['Portero', 'Cierre', 'Ala', 'Pívot', 'Universal', 'Entrenado
 const isStaff = m => ['Entrenador', 'Staff'].includes(m?.position);
 function viewSquad(view) {
   const act = S.members.filter(m => m.active);
-  header('Plantilla', { sub: `${act.length} en el ${TEAM.label.toLowerCase()}` });
+  header('Plantilla', { sub: SUB });
   const sort = (a, b) => (a.dorsal ?? 999) - (b.dorsal ?? 999) || a.name.localeCompare(b.name, 'es');
   const gk = act.filter(isGK).sort(sort);
   const staff = act.filter(isStaff).sort(sort);

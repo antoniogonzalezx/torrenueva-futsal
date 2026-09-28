@@ -23,6 +23,7 @@ app/                    código compartido
   icon-*.png
 supabase/
   migrations/           esquema, RLS, funciones y triggers
+  functions/signup/     alta de jugadores (valida el código y crea la cuenta)
   functions/notify/     edge function de notificaciones push
   seed.example.sql      cómo dar de alta un equipo y su plantilla
 ```
@@ -44,10 +45,11 @@ Todas las rutas son relativas, así que funciona tanto en la raíz de un dominio
 
 ### Acceso
 
-Cada jugador reclama su nombre de la plantilla con el código del equipo y una contraseña (Supabase Auth, email
-interno `<id>@<dominio>` que nunca recibe correo). Un trigger en `auth.users` valida el código (guardado con bcrypt)
-y que el jugador no tenga ya cuenta. Requisito: en Supabase, *Authentication → Sign In / Providers → Email* con
-**Confirm email desactivado**.
+Cada jugador reclama su nombre de la plantilla con el código del equipo y una contraseña. El alta la hace la edge
+function `signup`: valida el código (guardado con bcrypt) y crea la cuenta ya confirmada con la API de administración
+de Supabase Auth. Así no se envían correos: el email de cada cuenta es interno (`<id>@<dominio>`) y no existe. Un
+trigger en `auth.users` repite la validación y vincula la cuenta al jugador. El inicio de sesión es el normal de
+Supabase (email interno + contraseña).
 
 ### Datos y permisos
 
@@ -81,7 +83,8 @@ publicaciones a 1280 px. El bucket `media` acepta solo WebP/JPEG de hasta 1,5 MB
 1. Crea un proyecto de Supabase y aplica `supabase/migrations/` en orden.
 2. Da de alta los equipos y la plantilla siguiendo `supabase/seed.example.sql`.
 3. Genera claves VAPID (`npx web-push generate-vapid-keys`) y guárdalas en `app_secrets`, junto a un secreto para el
-   webhook. Despliega `supabase/functions/notify` sin verificación JWT: se autentica con ese secreto.
+   webhook. Despliega `supabase/functions/notify` y `supabase/functions/signup` sin verificación JWT
+   (`notify` se autentica con ese secreto; `signup` es pública y valida el código del equipo).
 4. En `app/app.js`, pon la URL del proyecto, la clave `anon` y la clave VAPID pública.
 5. Para cada equipo, copia una carpeta de equipo y ajusta `window.TEAM`, el manifest, la caché del `sw.js` y los iconos.
 6. Publica el repositorio con GitHub Pages: rama `main`, carpeta raíz.
