@@ -16,16 +16,36 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 // hasta que se vuelve con ella. Las cookies se guardan y se reenvían en todas las peticiones.
 const jar = new Map();
 let lastRaw = '';   // última respuesta tal cual, para la prueba de conexión
-async function get(url) {
-  let html = '';
-  for (let i = 0; i < 3; i++) {
+const probe = process.argv.includes('--probe');
+// Las redirecciones se siguen a mano: la cookie de sesión llega en la respuesta 302 y fetch la perdería.
+async function request(url) {
+  for (let hop = 0; hop < 8; hop++) {
     const cookie = [...jar].map(([k, v]) => `${k}=${v}`).join('; ');
-    const res = await fetch(url, { headers: { ...HEADERS, ...(cookie && { Cookie: cookie }) } });
+    const res = await fetch(url, { redirect: 'manual', headers: { ...HEADERS, ...(cookie && { Cookie: cookie }) } });
     const set = res.headers.getSetCookie();
     set.forEach(c => { const [kv] = c.split(';'), j = kv.indexOf('='); jar.set(kv.slice(0, j).trim(), kv.slice(j + 1).trim()); });
+    if (probe) console.log(`  ${res.status} ${url} · set-cookie: ${set.length}`);
+    const loc = res.headers.get('location');
+    if (res.status >= 300 && res.status < 400 && loc) { url = new URL(loc, url).href; continue; }
+    return res;
+  }
+  throw new Error(`demasiadas redirecciones: ${url}`);
+}
+// Primera visita a la portada, como haría un navegador, para que la web abra la sesión.
+let warm = false;
+async function get(url) {
+  if (!warm) {
+    warm = true;
+    for (const u of ['https://www.ffcm.es/', 'https://www.ffcm.es/pnfg/NPcd/NFG_Home']) {
+      try { await (await request(u)).arrayBuffer(); } catch (e) { if (probe) console.log(`  ${u}: ${e.message}`); }
+    }
+  }
+  let html = '';
+  for (let i = 0; i < 3; i++) {
+    const res = await request(url);
     if (!res.ok) throw new Error(`${res.status} ${url}`);
     html = lastRaw = decode(new Uint8Array(await res.arrayBuffer()), res.headers.get('content-type'));
-    if (process.argv.includes('--probe')) console.log(`intento ${i + 1}: ${res.status}, ${html.length} caracteres, set-cookie: ${set.length}`);
+    if (probe) console.log(`intento ${i + 1}: ${html.length} caracteres`);
     if (html.trim() && !/no se ha aceptado (el|la) cookie/i.test(html)) return html;
   }
   return /no se ha aceptado (el|la) cookie/i.test(html) ? '' : html;
