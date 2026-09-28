@@ -62,7 +62,15 @@ El plan gratuito da 1 GB para los dos equipos.
 
 * Triggers en `posts`, `post_comments` y `post_likes` llaman con `pg_net` a la edge function `notify`, que las envía con Web Push (VAPID).
 * **Se avisa de**: partido nuevo y multa nueva a todo el equipo; comentario al autor y al jugador; kudos al jugador.
+* **Recordatorio de multas**: cada día a las 08:00 UTC (10:00 en verano, 9:00 en invierno), `pg_cron` avisa a cada jugador
+  con multas que pasan a ×2 o ×4 en 2 días. Si tiene varias, recibe una sola notificación. Job: `fine-reminders`.
 * Las claves VAPID y el secreto del webhook están en `public.app_secrets`, que solo puede leer el servidor.
 * Cada jugador las activa en *Mi cuenta → Notificaciones*.
 * **Android**: funcionan en Chrome, esté o no instalada la app.
 * **iPhone** (iOS 16.4 o superior): solo con la app instalada en la pantalla de inicio.
+
+## Temporada 2025/26
+
+Las tablas antiguas (`players`, `multas`, `lives_log`, `matches`, `match_players`, `mvp_votes`, `premios`, `config`)
+siguen en la base de datos como archivo, pero están bloqueadas: la clave pública no puede leerlas ni modificarlas.
+Solo se consultan desde el panel de Supabase.
