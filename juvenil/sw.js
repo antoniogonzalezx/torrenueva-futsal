@@ -1,5 +1,5 @@
 self.PREFIX = 'tfs-juvenil-';
-self.CACHE_NAME = 'tfs-juvenil-v2';
+self.CACHE_NAME = 'tfs-juvenil-v3';
 self.PRECACHE = [
   './', './manifest.webmanifest', './icon-192.png', './apple-touch-icon.png',
   '../app/app.css', '../app/app.js', '../app/vendor/supabase-2.117.2.js',
