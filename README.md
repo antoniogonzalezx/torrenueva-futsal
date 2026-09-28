@@ -47,7 +47,7 @@ Todas las rutas son relativas, así que funciona tanto en la raíz de un dominio
   - *Jornada*: la jornada abierta, con todos los partidos del grupo menos el nuestro. Signo único acertado: 3 puntos;
     doble acertado: 1 punto; máximo 4 dobles. Se entrega entera y se puede cambiar hasta el viernes a las 14:00
     (hora de Madrid); después se ven los pronósticos de todos.
-  - *Ranking*: total o por jornada (desplegable con las jornadas cerradas).
+  - *Tabla*: clasificación de la quiniela, total o por jornada (desplegable con las jornadas cerradas).
   - Solo hay una jornada abierta. El domingo a las 22:00 se leen los resultados, se cierra (lo que siga sin
     resultado, como un aplazado, se anula) y se abre la siguiente. Cuenta el resultado oficial de la federación.
   - Empate en el ranking: más plenos y, después, menos dobles usados.
