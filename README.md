@@ -25,7 +25,11 @@ supabase/
   migrations/           esquema, RLS, funciones y triggers
   functions/signup/     alta de jugadores (valida el código y crea la cuenta)
   functions/notify/     edge function de notificaciones push
+  functions/ffcm-sync/  lee resultados y horarios de ffcm.es
+  seeds/                calendario de la liga de cada equipo (generado con scripts/calendario_pdf.py)
   seed.example.sql      cómo dar de alta un equipo y su plantilla
+scripts/
+  calendario_pdf.py     convierte el PDF de calendario de la federación en SQL
 ```
 
 Todas las rutas son relativas, así que funciona tanto en la raíz de un dominio como en un subdirectorio.
@@ -39,6 +43,14 @@ Todas las rutas son relativas, así que funciona tanto en la raíz de un dominio
 - **Plantilla y ficha**: foto, dorsal, posición y estadísticas de fútbol sala; los porteros tienen además paradas,
   goles encajados y porterías a cero.
 - **Historial**: recaudación, ranking y movimientos de saldo.
+- **Liga** (solo equipos con competición): calendario y resultados de la federación, clasificación y quiniela.
+  - Quiniela de cada jornada con todos los partidos del grupo menos el nuestro. Signo único acertado: 3 puntos;
+    doble acertado: 1 punto; máximo 4 dobles. Se entrega entera y se puede cambiar hasta el viernes a las 14:00
+    (hora de Madrid). Los pronósticos de los demás se ven después del cierre.
+  - Partido aplazado o suspendido: anulado (0 puntos para todos). Tres días después de la jornada, lo que siga
+    sin resultado también se anula. Cuenta el resultado oficial de la federación.
+  - Ranking general; empate: más plenos y, después, menos dobles usados.
+  - Los admins pueden corregir un resultado o anular un partido a mano (la sincronización deja de tocarlo).
 - **Notificaciones push** (Web Push/VAPID): actividad del feed y un recordatorio diario de multas a punto de duplicarse.
 
 ## Backend
@@ -60,6 +72,8 @@ Supabase (email interno + contraseña).
 | `fines`, `credit_log` | multas y movimientos de saldo |
 | `posts`, `post_likes`, `post_comments` | feed |
 | `push_subscriptions` | suscripciones Web Push |
+| `competitions`, `rounds`, `fixtures` | liga: competición, jornadas (con su cierre) y partidos |
+| `picks` | pronósticos de la quiniela (vista `pick_points` con los puntos) |
 | `app_secrets` | claves VAPID y secreto del webhook (solo `service_role`) |
 
 - RLS en todas las tablas: cada usuario solo ve y modifica los datos de su equipo.
@@ -76,6 +90,25 @@ publicaciones a 1280 px. El bucket `media` acepta solo WebP/JPEG de hasta 1,5 MB
 
 - Triggers en `posts`, `post_comments` y `post_likes` llaman con `pg_net` a la edge function `notify`.
 - `pg_cron` la llama cada día con `{ "type": "reminders" }` para avisar de las multas que se duplican en 2 días.
+- Quiniela: `pg_cron` avisa el jueves por la tarde y el viernes por la mañana a quien no la ha entregado
+  (`{ "type": "quiniela_reminder" }`), y `ffcm-sync` pide el push con los puntos de la jornada (`quiniela_results`)
+  la primera noche después de jugarse.
+
+### Liga y resultados
+
+- `scripts/calendario_pdf.py` convierte el PDF de calendario de ffcm.es en SQL (competición, jornadas y partidos).
+  Los códigos `codtemporada`, `codcompeticion` y `codgrupo` salen de la URL del calendario en la web.
+- `ffcm-sync` procesa el calendario de ffcm.es (una sola página con toda la temporada y sus resultados): busca cada
+  partido por el nombre de los equipos y guarda resultado o aplazamiento. Con `?debug=<jornada>` devuelve el texto
+  que extrae de la web, para ajustar el lector si la federación cambia la página.
+- ffcm.es devuelve páginas vacías a los servidores de Supabase, así que las descarga GitHub: el workflow
+  `.github/workflows/ffcm-sync.yml` (cada noche, 20:45 UTC) ejecuta `scripts/ffcm_fetch.mjs`, que pide a `ffcm-sync`
+  qué páginas necesita, las descarga (abriendo sesión en la web, que exige cookie) y se las manda. Necesita el
+  secreto de repositorio `FFCM_SYNC_SECRET` con el valor de `webhook_secret` de `app_secrets`. Se puede lanzar a
+  mano desde Actions → Resultados ffcm.es → Run workflow.
+- `pg_cron` llama también a `ffcm-sync` cada noche (21:30 UTC) para cerrar jornadas y mandar el push de puntos
+  aunque los resultados se hayan puesto a mano.
+- `close_rounds()` (`pg_cron`, cada mañana) anula lo que siga sin resultado tres días después de la jornada.
 - En iOS solo funcionan con la app instalada en la pantalla de inicio (iOS 16.4 o superior).
 
 ## Puesta en marcha
@@ -85,6 +118,8 @@ publicaciones a 1280 px. El bucket `media` acepta solo WebP/JPEG de hasta 1,5 MB
 3. Genera claves VAPID (`npx web-push generate-vapid-keys`) y guárdalas en `app_secrets`, junto a un secreto para el
    webhook. Despliega `supabase/functions/notify` y `supabase/functions/signup` sin verificación JWT
    (`notify` se autentica con ese secreto; `signup` es pública y valida el código del equipo).
+   Despliega también `supabase/functions/ffcm-sync` sin verificación JWT (acepta el secreto o el JWT de un admin).
+   Para la liga, ejecuta el SQL del calendario del equipo (`supabase/seeds/`).
 4. En `app/app.js`, pon la URL del proyecto, la clave `anon` y la clave VAPID pública.
 5. Para cada equipo, copia una carpeta de equipo y ajusta `window.TEAM`, el manifest, la caché del `sw.js` y los iconos.
 6. Publica el repositorio con GitHub Pages: rama `main`, carpeta raíz.

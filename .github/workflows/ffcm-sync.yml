@@ -1,0 +1,27 @@
+# Resultados y horarios de ffcm.es → Supabase.
+# ffcm.es devuelve páginas vacías a los servidores de Supabase, así que las descarga GitHub
+# y las procesa la edge function ffcm-sync (ver scripts/ffcm_fetch.mjs).
+# Necesita el secreto del repositorio FFCM_SYNC_SECRET = valor de webhook_secret en public.app_secrets.
+name: Resultados ffcm.es
+
+on:
+  schedule:
+    - cron: '45 20 * * *'   # cada noche: 22:45 en verano / 21:45 en invierno (hora de Madrid)
+  workflow_dispatch:
+  push:                      # prueba de conexión (--probe) al tocar el workflow o el script en una rama de trabajo
+    branches: ['claude/**']
+    paths: ['.github/workflows/ffcm-sync.yml', 'scripts/ffcm_fetch.mjs']
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/ffcm_fetch.mjs ${{ github.event_name == 'push' && '--probe' || '' }}
+        env:
+          SUPABASE_URL: https://cmfhosxslodnrxlpifrn.supabase.co
+          SYNC_SECRET: ${{ secrets.FFCM_SYNC_SECRET }}

@@ -1,6 +1,8 @@
 // Envía notificaciones push:
 //  · actividad del feed: la llama la base de datos (pg_net) desde triggers en posts, post_comments y post_likes;
-//  · recordatorio de multas a punto de duplicarse: la llama pg_cron cada mañana con { type: "reminders" }.
+//  · recordatorio de multas a punto de duplicarse: la llama pg_cron cada mañana con { type: "reminders" };
+//  · quiniela: recordatorio a quien no la ha rellenado ({ type: "quiniela_reminder" }, pg_cron jueves y viernes)
+//    y puntos de la jornada ({ type: "quiniela_results" }, la llama ffcm-sync después de leer los resultados).
 // Las claves VAPID y el secreto del webhook viven en public.app_secrets (sin acceso para anon/authenticated).
 import { createClient } from "npm:@supabase/supabase-js@2";
 import webpush from "npm:web-push@3.6.7";
@@ -59,12 +61,82 @@ async function reminders() {
   return new Response(String(sent));
 }
 
+const madridDay = (offsetDays = 0) => new Date(Date.now() + offsetDays * 864e5).toLocaleDateString("sv-SE", { timeZone: "Europe/Madrid" });
+const pts = (n: number) => `${n} punto${n === 1 ? "" : "s"}`;
+
+async function pushTo(memberIds: string[], payload: (memberId: string) => string | null) {
+  if (!memberIds.length) return 0;
+  const { data: subs } = await db.from("push_subscriptions").select("*").in("member_id", memberIds);
+  let sent = 0;
+  await Promise.all((subs || []).map(async (s) => { const p = payload(s.member_id); if (p && await send(s, p)) sent++; }));
+  return sent;
+}
+
+// Quiniela sin rellenar (pg_cron: jueves por la tarde y viernes por la mañana).
+async function quinielaReminder() {
+  const now = new Date();
+  const { data: rounds } = await db.from("rounds").select("id,num,deadline,competitions(team_id)")
+    .gt("deadline", now.toISOString()).lt("deadline", new Date(+now + 30 * 36e5).toISOString());
+  let sent = 0;
+  for (const r of rounds || []) {
+    const teamId = (r.competitions as unknown as { team_id: string }).team_id;
+    const [{ data: members }, { data: picks }] = await Promise.all([
+      db.from("members").select("id").eq("team_id", teamId).eq("active", true).not("user_id", "is", null),
+      db.from("picks").select("member_id").eq("round_id", r.id),
+    ]);
+    const done = new Set((picks || []).map((p) => p.member_id));
+    const missing = (members || []).map((m) => m.id).filter((id) => !done.has(id));
+    const today = new Date(r.deadline).toLocaleDateString("sv-SE", { timeZone: "Europe/Madrid" }) === madridDay();
+    const payload = JSON.stringify({ title: `Quiniela · jornada ${r.num}`,
+      body: `Cierra ${today ? "hoy" : "mañana"} a las 14:00 y aún no la has rellenado.`, url: "#liga", tag: `quiniela-${r.id}` });
+    sent += await pushTo(missing, () => payload);
+  }
+  return new Response(String(sent));
+}
+
+// Puntos de la jornada (lo pide ffcm-sync cada noche; se manda una vez, en cuanto hay resultados tras el día de la jornada).
+async function quinielaResults() {
+  const { data: rounds } = await db.from("rounds").select("id,num,competition_id,competitions(team_id)")
+    .is("notified_at", null).lte("match_date", madridDay(-1)).lt("deadline", new Date().toISOString());
+  let sent = 0;
+  for (const r of rounds || []) {
+    const teamId = (r.competitions as unknown as { team_id: string }).team_id;
+    const [{ data: fixtures }, { data: pp }, { data: members }] = await Promise.all([
+      db.from("fixtures").select("id,home_goals,void,ours").eq("round_id", r.id),
+      db.from("pick_points").select("member_id,points").eq("round_id", r.id),
+      db.from("members").select("id,name,nickname").eq("team_id", teamId).eq("active", true),
+    ]);
+    const bet = (fixtures || []).filter((f) => !f.ours && !f.void);
+    const played = bet.filter((f) => f.home_goals != null).length;
+    if (!played) continue;   // la federación aún no ha subido nada: se reintenta la noche siguiente
+    const tot = new Map<string, { p: number; hits: number }>();
+    (pp || []).forEach((x) => {
+      const t = tot.get(x.member_id) || { p: 0, hits: 0 };
+      t.p += x.points || 0; if (x.points) t.hits++;
+      tot.set(x.member_id, t);
+    });
+    const best = Math.max(0, ...[...tot.values()].map((t) => t.p));
+    const leaders = [...tot].filter(([, t]) => t.p === best).map(([id]) => first(members?.find((m) => m.id === id)));
+    const lead = !tot.size ? "Nadie la rellenó." : best ? `${leaders.length > 1 ? "Mejores" : "Mejor"}: ${leaders.join(", ")} con ${best}.` : "Nadie ha puntuado.";
+    const left = bet.length - played ? ` Faltan ${bet.length - played} resultado${bet.length - played > 1 ? "s" : ""}.` : "";
+    sent += await pushTo((members || []).map((m) => m.id), (id) => {
+      const me = tot.get(id);
+      const body = (me ? `Has sacado ${pts(me.p)} (${me.hits} acierto${me.hits === 1 ? "" : "s"}). ` : "") + lead + left;
+      return JSON.stringify({ title: `Quiniela · resultados de la jornada ${r.num}`, body, url: "#liga", tag: `quiniela-${r.id}` });
+    });
+    await db.from("rounds").update({ notified_at: new Date().toISOString() }).eq("id", r.id);
+  }
+  return new Response(String(sent));
+}
+
 Deno.serve(async (req) => {
   try {
     const c = await config();
     if (req.headers.get("x-notify-secret") !== c.webhook_secret) return new Response("forbidden", { status: 403 });
     const payloadIn = await req.json();
     if (payloadIn.type === "reminders") return await reminders();
+    if (payloadIn.type === "quiniela_reminder") return await quinielaReminder();
+    if (payloadIn.type === "quiniela_results") return await quinielaResults();
     const { table, record } = payloadIn;
 
     const post = table === "posts" ? record
