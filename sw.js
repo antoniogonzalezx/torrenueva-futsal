@@ -1,47 +1,11 @@
-const CACHE = 'multas-v3';
-const ASSETS = ['/manifest.json', '/escudo.png'];
-
-self.addEventListener('install', e => {
-  e.waitUntil(
-    caches.open(CACHE).then(c => c.addAll(ASSETS).catch(() => {}))
-  );
-  self.skipWaiting();
-});
-
+// La app 2025/26 vivía en la raíz. Este service worker limpia su caché y se desinstala,
+// para que quien la tenga instalada vea la portada nueva con los enlaces por equipo.
+self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', e => {
-  e.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
-    )
-  );
-  self.clients.claim();
-});
-
-self.addEventListener('fetch', e => {
-  const url = e.request.url;
-
-  // Supabase → siempre red, nunca caché
-  if (url.includes('supabase.co')) {
-    e.respondWith(fetch(e.request));
-    return;
-  }
-
-  // HTML → network-first: intenta red, si falla usa caché
-  if (e.request.mode === 'navigate' || url.endsWith('.html') || url.endsWith('/')) {
-    e.respondWith(
-      fetch(e.request)
-        .then(res => {
-          const clone = res.clone();
-          caches.open(CACHE).then(c => c.put(e.request, clone));
-          return res;
-        })
-        .catch(() => caches.match(e.request))
-    );
-    return;
-  }
-
-  // Resto → cache-first
-  e.respondWith(
-    caches.match(e.request).then(r => r || fetch(e.request))
-  );
+  e.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.filter(k => k.startsWith('multas-')).map(k => caches.delete(k)));
+    await self.registration.unregister();
+    (await self.clients.matchAll({ type: 'window' })).forEach(c => c.navigate(c.url));
+  })());
 });
