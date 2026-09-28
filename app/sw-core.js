@@ -19,3 +19,24 @@ self.addEventListener('fetch', e => {
     }).catch(() => caches.match(req, { ignoreSearch: true }).then(r => r || (req.mode === 'navigate' ? caches.match('./') : undefined)))
   );
 });
+
+// Notificaciones push (las envía la edge function «notify»).
+self.addEventListener('push', e => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch { d = { title: 'Torrenueva FS', body: e.data?.text() }; }
+  e.waitUntil(self.registration.showNotification(d.title || 'Torrenueva FS', {
+    body: d.body || '', tag: d.tag, renotify: !!d.tag,
+    icon: new URL('icon-192.png', self.registration.scope).href,
+    badge: new URL('icon-192.png', self.registration.scope).href,
+    data: { url: new URL(d.url || './', self.registration.scope).href },
+  }));
+});
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = e.notification.data?.url || self.registration.scope;
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+    const c = list.find(w => w.url.startsWith(self.registration.scope));
+    if (c) return c.focus().then(w => w.navigate ? w.navigate(url) : w);
+    return self.clients.openWindow(url);
+  }));
+});

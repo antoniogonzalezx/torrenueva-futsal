@@ -1,55 +1,68 @@
-# Torrenueva FS · app de multas 2026/27
+# Torrenueva FS · 2026/27
 
 Una PWA por equipo, con el mismo código para las dos:
 
-| Equipo  | Enlace para el grupo | Carpeta    |
-|---------|----------------------|------------|
-| Senior  | `https://<tu-dominio>/senior/`  | `senior/`  |
-| Juvenil | `https://<tu-dominio>/juvenil/` | `juvenil/` |
+| Equipo  | Enlace | Carpeta | Admins |
+|---------|--------|---------|--------|
+| Senior  | `https://<tu-dominio>/senior/`  | `senior/`  | Antonio, Adrián Vivar, Salva |
+| Juvenil | `https://<tu-dominio>/juvenil/` | `juvenil/` | Adrián Mister, Jesús |
 
-Cada carpeta tiene su propio `manifest.webmanifest`, sus iconos y su `sw.js`, así que cada enlace
-se instala como una app independiente, y la sesión de cada una se guarda por separado. La raíz (`/`) es una portada con
-los dos enlaces y desinstala el service worker de la app 25/26.
+Cada carpeta tiene su propio `manifest.webmanifest`, sus iconos y su `sw.js`, así que cada enlace se instala como
+una app independiente y guarda su propia sesión. La raíz (`/`) es una portada con los dos enlaces.
 
 ```
-app/            código compartido (app.js, app.css, fuentes, supabase-js)
+app/            código compartido: app.js, app.css, icons.js (css.gg), Inter, supabase-js
 senior/         PWA del senior    (window.TEAM = { slug: 'senior', … })
 juvenil/        PWA del juvenil   (window.TEAM = { slug: 'juvenil', … })
-supabase/       migraciones y seed de la temporada 26/27
+supabase/       migraciones, seed y la edge function «notify» (push)
 ```
+
+## Identidad
+
+Inter, blanco y negro, y un único acento por equipo: verde `#00CB57` en el senior y amarillo `#FFD100` en el juvenil.
+El acento siempre va de fondo con texto negro encima. No hay sombras ni degradados: la estructura se marca con filetes
+de 1 px, cifras grandes y la fila «→ etiqueta · valor». Iconos: [css.gg](https://github.com/astrit/css.gg) (MIT).
+css.gg no tiene balón, así que el balón del icono de la app está dibujado aparte con la misma geometría.
+
+## Pantallas
+
+* **Multas** (inicio): el bote pendiente, tu deuda y las multas por jugador. Se duplican a los 15 días (×2) y a los
+  29 (×4); los cobros no se duplican. El pago que sobra queda como saldo a favor.
+* **Feed**: partidos publicados por los jugadores (rival, resultado, goles, asistencias, paradas, foto) y cada multa
+  nueva. Todo admite kudos y comentarios. Publicar un partido suma automáticamente a las estadísticas del jugador,
+  y borrarlo las resta.
+* **Plantilla** y **ficha**: líderes (goles y asistencias), foto (la puede cambiar cualquiera) y estadísticas de
+  futsal. Los porteros tienen además paradas, goles encajados y porterías a cero.
+* **Historial**: recaudación, quién más ha aportado, multas pagadas por mes y movimientos de saldo.
 
 ## Acceso
 
-* **Crear cuenta**: el jugador busca su nombre en la plantilla, mete el **código del equipo** y elige contraseña.
-  Cada nombre solo se puede reclamar una vez. El servidor lo valida en un trigger de `auth.users`, así que no depende del navegador.
-* **Entrar**: toca su nombre y pone la contraseña. No hace falta email: por dentro se usa `<id>@jugadores.torrenuevafs.app`.
-* **Olvidó la contraseña**: un admin abre su ficha y pulsa *Liberar cuenta*; el jugador vuelve a registrarse.
-* Los códigos de equipo se guardan con hash (bcrypt). Para cambiarlos:
+* **Crear cuenta**: el jugador elige su nombre, mete el código del equipo y una contraseña. Cada nombre se reclama
+  una sola vez, y el servidor lo valida en un trigger de `auth.users`.
+* **Entrar**: toca su nombre y pone la contraseña. Por dentro se usa un email `<id>@jugadores.torrenuevafs.app`, que no recibe correo.
+* **Admins**: dan de alta jugadores, dan de baja, liberan cuentas (si alguien olvida la contraseña) y ven el espacio de fotos usado.
+* Cambiar el código de un equipo:
   ```sql
   update public.teams set join_code_hash = extensions.crypt('NUEVO-CODIGO', extensions.gen_salt('bf')) where slug = 'senior';
   ```
-* Para nombrar al primer admin:
-  ```sql
-  update public.members set is_admin = true where name = 'Antonio' and team_id = (select id from teams where slug = 'senior');
-  ```
 
-### Ajustes necesarios en Supabase (Dashboard → Authentication)
+En Supabase (Authentication → Sign In / Providers → Email) tiene que estar **Confirm email desactivado**.
 
-1. **Sign In / Providers → Email**: activado, con **Confirm email desactivado** (los emails son internos y nunca llegan).
-2. **Allow new users to sign up**: activado. Sin el código del equipo nadie puede registrarse igualmente.
+## Fotos sin llenar el almacenamiento
 
-## Datos
+El plan gratuito da 1 GB para los dos equipos.
 
-La temporada 26/27 usa tablas nuevas (`teams`, `members`, `fines`, `credit_log`, `messages`) con RLS: cada jugador
-solo ve y escribe los datos de su equipo. Las tablas de la 25/26 (`players`, `multas`, …) no se han tocado.
+* Las fotos se comprimen en el móvil antes de subirlas: WebP (o JPEG en Safari antiguo). Las de perfil se recortan a
+  480×480 (~30–60 KB) y las de partido a 1280 px de lado (~120–250 KB).
+* El bucket rechaza archivos de más de 1,5 MB y todo lo que no sea WebP o JPEG.
+* Al cambiar o quitar una foto de perfil se borra la anterior. Al borrar una publicación se borra su foto.
+* Los admins ven el uso en *Mi cuenta → Espacio de fotos*. A ~200 KB por foto caben unas 5.000.
 
-* Las multas se duplican a los 15 días (×2) y a los 29 (×4); los cobros no se duplican.
-* Si alguien paga de más, el exceso queda como **saldo a favor** y se descuenta de su siguiente multa automáticamente.
-  Toda esta lógica corre en funciones SQL (`add_fine`, `pay_fine`, `delete_fine`) para que el saldo no se descuadre.
-* Las fichas (datos y estadísticas) las puede editar cualquier jugador registrado. El saldo, el admin y la cuenta, no.
-* Las fotos (perfil y chat) se comprimen en el móvil y se suben al bucket `media`, en la carpeta del equipo.
+## Notificaciones push
 
-## Chat
-
-El chat es tiempo real (Supabase Realtime) y admite texto, fotos y GIFs. Para **buscar** GIFs dentro de la app, crea una
-clave gratuita en developers.giphy.com y ponla en `GIPHY_KEY` (`app/app.js`). Sin clave, se pueden enviar GIFs guardados en el móvil.
+* Triggers en `posts`, `post_comments` y `post_likes` llaman con `pg_net` a la edge function `notify`, que las envía con Web Push (VAPID).
+* **Se avisa de**: partido nuevo y multa nueva a todo el equipo; comentario al autor y al jugador; kudos al jugador.
+* Las claves VAPID y el secreto del webhook están en `public.app_secrets`, que solo puede leer el servidor.
+* Cada jugador las activa en *Mi cuenta → Notificaciones*.
+* **Android**: funcionan en Chrome, esté o no instalada la app.
+* **iPhone** (iOS 16.4 o superior): solo con la app instalada en la pantalla de inicio.
