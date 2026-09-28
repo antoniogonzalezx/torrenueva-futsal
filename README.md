@@ -1,76 +1,93 @@
-# Torrenueva FS · 2026/27
+# Torrenueva FS
 
-Una PWA por equipo, con el mismo código para las dos:
+App web progresiva (PWA) para gestionar las multas, los partidos y la plantilla de un equipo de fútbol sala.
+Sin build: HTML, CSS y JavaScript estáticos servidos por GitHub Pages, con [Supabase](https://supabase.com) como backend
+(Postgres, Auth, Storage, Realtime y Edge Functions).
 
-| Equipo  | Enlace | Carpeta | Admins |
-|---------|--------|---------|--------|
-| Senior  | `https://<tu-dominio>/senior/`  | `senior/`  | Antonio, Adrián Vivar, Salva |
-| Juvenil | `https://<tu-dominio>/juvenil/` | `juvenil/` | Adrián Mister, Jesús |
-
-Cada carpeta tiene su propio `manifest.webmanifest`, sus iconos y su `sw.js`, así que cada enlace se instala como
-una app independiente y guarda su propia sesión. La raíz (`/`) es una portada con los dos enlaces.
+## Estructura
 
 ```
-app/            código compartido: app.js, app.css, icons.js (css.gg), Inter, supabase-js
-senior/         PWA del senior    (window.TEAM = { slug: 'senior', … })
-juvenil/        PWA del juvenil   (window.TEAM = { slug: 'juvenil', … })
-supabase/       migraciones, seed y la edge function «notify» (push)
+index.html              portada con un enlace por equipo
+sw.js                   desinstala el service worker de la versión anterior (servida desde la raíz)
+app/                    código compartido
+  app.js                toda la lógica de la interfaz (vanilla JS)
+  app.css               estilos
+  icons.js              iconos SVG de css.gg
+  sw-core.js            service worker compartido (caché + notificaciones push)
+  fonts/                Inter (variable, woff2)
+  vendor/               supabase-js (UMD)
+<equipo>/               una PWA por equipo (p. ej. senior/, juvenil/)
+  index.html            define window.TEAM = { slug, name, label, season }
+  manifest.webmanifest  nombre, colores e iconos propios → cada equipo se instala como app independiente
+  sw.js                 nombre de caché y lista de precarga; importa app/sw-core.js
+  icon-*.png
+supabase/
+  migrations/           esquema, RLS, funciones y triggers
+  functions/notify/     edge function de notificaciones push
+  seed.example.sql      cómo dar de alta un equipo y su plantilla
 ```
 
-## Identidad
+Todas las rutas son relativas, así que funciona tanto en la raíz de un dominio como en un subdirectorio.
 
-Inter, blanco y negro, y un único acento por equipo: verde `#00CB57` en el senior y amarillo `#FFD100` en el juvenil.
-El acento siempre va de fondo con texto negro encima. No hay sombras ni degradados: la estructura se marca con filetes
-de 1 px, cifras grandes y la fila «→ etiqueta · valor». Iconos: [css.gg](https://github.com/astrit/css.gg) (MIT).
-css.gg no tiene balón, así que el balón del icono de la app está dibujado aparte con la misma geometría.
+## Funcionalidades
 
-## Pantallas
+- **Multas**: pendientes por jugador; se duplican a los 15 días y se cuadruplican a los 29 (los «cobros» no).
+  Si alguien paga de más, el exceso queda como saldo a favor y se descuenta de la siguiente multa.
+- **Feed**: partidos publicados por los jugadores (rival, resultado, goles, asistencias, paradas, foto) y cada multa
+  nueva. Todo admite «kudos» y comentarios. Publicar un partido suma a las estadísticas del jugador.
+- **Plantilla y ficha**: foto, dorsal, posición y estadísticas de fútbol sala; los porteros tienen además paradas,
+  goles encajados y porterías a cero.
+- **Historial**: recaudación, ranking y movimientos de saldo.
+- **Notificaciones push** (Web Push/VAPID): actividad del feed y un recordatorio diario de multas a punto de duplicarse.
 
-* **Multas** (inicio): el bote pendiente, tu deuda y las multas por jugador. Se duplican a los 15 días (×2) y a los
-  29 (×4); los cobros no se duplican. El pago que sobra queda como saldo a favor.
-* **Feed**: partidos publicados por los jugadores (rival, resultado, goles, asistencias, paradas, foto) y cada multa
-  nueva. Todo admite kudos y comentarios. Publicar un partido suma automáticamente a las estadísticas del jugador,
-  y borrarlo las resta.
-* **Plantilla** y **ficha**: líderes (goles y asistencias), foto (la puede cambiar cualquiera) y estadísticas de
-  futsal. Los porteros tienen además paradas, goles encajados y porterías a cero.
-* **Historial**: recaudación, quién más ha aportado, multas pagadas por mes y movimientos de saldo.
+## Backend
 
-## Acceso
+### Acceso
 
-* **Crear cuenta**: el jugador elige su nombre, mete el código del equipo y una contraseña. Cada nombre se reclama
-  una sola vez, y el servidor lo valida en un trigger de `auth.users`.
-* **Entrar**: toca su nombre y pone la contraseña. Por dentro se usa un email `<id>@jugadores.torrenuevafs.app`, que no recibe correo.
-* **Admins**: dan de alta jugadores, dan de baja, liberan cuentas (si alguien olvida la contraseña) y ven el espacio de fotos usado.
-* Cambiar el código de un equipo:
-  ```sql
-  update public.teams set join_code_hash = extensions.crypt('NUEVO-CODIGO', extensions.gen_salt('bf')) where slug = 'senior';
-  ```
+Cada jugador reclama su nombre de la plantilla con el código del equipo y una contraseña (Supabase Auth, email
+interno `<id>@<dominio>` que nunca recibe correo). Un trigger en `auth.users` valida el código (guardado con bcrypt)
+y que el jugador no tenga ya cuenta. Requisito: en Supabase, *Authentication → Sign In / Providers → Email* con
+**Confirm email desactivado**.
 
-En Supabase (Authentication → Sign In / Providers → Email) tiene que estar **Confirm email desactivado**.
+### Datos y permisos
 
-## Fotos sin llenar el almacenamiento
+| Tabla | Contenido |
+| --- | --- |
+| `teams` | equipos y hash del código de acceso |
+| `members` | jugadores, estadísticas, saldo, rol de admin |
+| `fines`, `credit_log` | multas y movimientos de saldo |
+| `posts`, `post_likes`, `post_comments` | feed |
+| `push_subscriptions` | suscripciones Web Push |
+| `app_secrets` | claves VAPID y secreto del webhook (solo `service_role`) |
 
-El plan gratuito da 1 GB para los dos equipos.
+- RLS en todas las tablas: cada usuario solo ve y modifica los datos de su equipo.
+- Las operaciones con dinero (`add_fine`, `pay_fine`, `delete_fine`) y las de admin se hacen en funciones
+  `security definer` que comprueban la pertenencia al equipo.
+- Las columnas sensibles (`credit`, `is_admin`, `user_id`) no son editables desde el cliente.
 
-* Las fotos se comprimen en el móvil antes de subirlas: WebP (o JPEG en Safari antiguo). Las de perfil se recortan a
-  480×480 (~30–60 KB) y las de partido a 1280 px de lado (~120–250 KB).
-* El bucket rechaza archivos de más de 1,5 MB y todo lo que no sea WebP o JPEG.
-* Al cambiar o quitar una foto de perfil se borra la anterior. Al borrar una publicación se borra su foto.
-* Los admins ven el uso en *Mi cuenta → Espacio de fotos*. A ~200 KB por foto caben unas 5.000.
+### Fotos
 
-## Notificaciones push
+Se comprimen en el navegador antes de subirlas: WebP, o JPEG si el navegador no codifica WebP. Perfil a 480 px,
+publicaciones a 1280 px. El bucket `media` acepta solo WebP/JPEG de hasta 1,5 MB, y las fotos sustituidas se borran.
 
-* Triggers en `posts`, `post_comments` y `post_likes` llaman con `pg_net` a la edge function `notify`, que las envía con Web Push (VAPID).
-* **Se avisa de**: partido nuevo y multa nueva a todo el equipo; comentario al autor y al jugador; kudos al jugador.
-* **Recordatorio de multas**: cada día a las 08:00 UTC (10:00 en verano, 9:00 en invierno), `pg_cron` avisa a cada jugador
-  con multas que pasan a ×2 o ×4 en 2 días. Si tiene varias, recibe una sola notificación. Job: `fine-reminders`.
-* Las claves VAPID y el secreto del webhook están en `public.app_secrets`, que solo puede leer el servidor.
-* Cada jugador las activa en *Mi cuenta → Notificaciones*.
-* **Android**: funcionan en Chrome, esté o no instalada la app.
-* **iPhone** (iOS 16.4 o superior): solo con la app instalada en la pantalla de inicio.
+### Notificaciones push
 
-## Temporada 2025/26
+- Triggers en `posts`, `post_comments` y `post_likes` llaman con `pg_net` a la edge function `notify`.
+- `pg_cron` la llama cada día con `{ "type": "reminders" }` para avisar de las multas que se duplican en 2 días.
+- En iOS solo funcionan con la app instalada en la pantalla de inicio (iOS 16.4 o superior).
 
-Las tablas antiguas (`players`, `multas`, `lives_log`, `matches`, `match_players`, `mvp_votes`, `premios`, `config`)
-siguen en la base de datos como archivo, pero están bloqueadas: la clave pública no puede leerlas ni modificarlas.
-Solo se consultan desde el panel de Supabase.
+## Puesta en marcha
+
+1. Crea un proyecto de Supabase y aplica `supabase/migrations/` en orden.
+2. Da de alta los equipos y la plantilla siguiendo `supabase/seed.example.sql`.
+3. Genera claves VAPID (`npx web-push generate-vapid-keys`) y guárdalas en `app_secrets`, junto a un secreto para el
+   webhook. Despliega `supabase/functions/notify` sin verificación JWT: se autentica con ese secreto.
+4. En `app/app.js`, pon la URL del proyecto, la clave `anon` y la clave VAPID pública.
+5. Para cada equipo, copia una carpeta de equipo y ajusta `window.TEAM`, el manifest, la caché del `sw.js` y los iconos.
+6. Publica el repositorio con GitHub Pages: rama `main`, carpeta raíz.
+
+La clave `anon` de Supabase es pública por diseño: la seguridad depende de las políticas RLS, no de ocultarla.
+
+## Créditos
+
+Iconos: [css.gg](https://github.com/astrit/css.gg) (MIT). Tipografía: [Inter](https://rsms.me/inter/) (OFL).

@@ -19,11 +19,7 @@ drop policy members_add on public.members;
 create policy members_add on public.members for insert to authenticated
   with check (team_id = public.my_team_id() and coalesce((public.my_member()).is_admin, false));
 
-update public.members m set is_admin = true
-from public.teams t
-where t.id = m.team_id and (
-  (t.slug = 'senior'  and m.name in ('Antonio', 'Adrián Vivar', 'Salva')) or
-  (t.slug = 'juvenil' and m.name in ('Adrián Mister', 'Jesús')));
+-- Los admins de cada equipo se asignan con datos, no en el esquema (ver supabase/seed.example.sql).
 
 -- ── Feed ────────────────────────────────────────────────────────
 create table public.posts (
