@@ -68,9 +68,11 @@ async function call(body) {
 if (process.argv.includes('--probe') || !SYNC_SECRET) {
   const html = await get(PROBE);
   console.log(`ffcm.es: ${html.length} caracteres · cookies: ${[...jar.keys()].join(', ') || 'ninguna'}`);
-  console.log(text(html).slice(0, 2000));
-  console.log('--- HTML (inicio) ---');
-  console.log((html || lastRaw).slice(0, 3000));
+  const at = html.indexOf('Jornada 1 (');
+  console.log('--- HTML de la jornada 1 ---');
+  console.log(at < 0 ? (html || lastRaw).slice(0, 3000) : html.slice(at, at + 5000));
+  console.log('--- Enlaces NFG_ ---');
+  console.log([...new Set([...html.matchAll(/href=["']?([^"' >]*NFG_[^"' >]*)/gi)].map(m => m[1].replace(/&amp;/g, '&')))].slice(0, 60).join('\n'));
   if (!html.length) { console.error('ffcm.es ha devuelto una página vacía: también bloquea esta máquina.'); process.exit(1); }
   process.exit(0);
 }
