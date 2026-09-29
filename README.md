@@ -39,7 +39,7 @@ Todas las rutas son relativas, así que funciona tanto en la raíz de un dominio
 - **Multas**: pendientes por jugador; se duplican a los 15 días y se cuadruplican a los 29 (los «cobros» no).
   Si alguien paga de más, el exceso queda como saldo a favor y se descuenta de la siguiente multa.
 - **Feed**: partidos publicados por los jugadores (rival, resultado, goles, asistencias, paradas, foto) y cada multa
-  nueva. Todo admite «kudos» y comentarios. Publicar un partido suma a las estadísticas del jugador.
+  nueva. Todo admite «me gusta» y comentarios. Publicar un partido suma a las estadísticas del jugador.
 - **Plantilla y ficha**: foto, dorsal, posición y estadísticas de fútbol sala; los porteros tienen además paradas,
   goles encajados y porterías a cero.
 - **Historial**: recaudación, ranking y movimientos de saldo.
