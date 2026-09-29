@@ -165,8 +165,8 @@ Deno.serve(async (req) => {
     } else if (table === "post_likes") {
       if (post.kind !== "match") return new Response("skip");
       actor = record.member_id; targets = [post.player_id];
-      title = `Kudos de ${first(who(record.member_id))}`;
-      body = post.rival ? `Por tu partido contra ${post.rival}` : "Por tu partido";
+      title = `❤ ${first(who(record.member_id))}`;
+      body = post.rival ? `vs ${post.rival}` : "Tu partido";
     } else return new Response("skip");
 
     let q = db.from("push_subscriptions").select("*").eq("team_id", post.team_id);

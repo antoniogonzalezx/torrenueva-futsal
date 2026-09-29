@@ -111,6 +111,20 @@ function avatar(m, cls = '') {
   return `<span class="av ${cls}">${inner}</span>`;
 }
 const multTag = mu => mu > 1 ? ` <span class="tag ${mu === 4 ? 'solid' : ''}">×${mu}</span>` : '';
+const busy = (b, on) => { if (!b) return; b.disabled = on; b.classList.toggle('busy', on); };
+const skeleton = (n = 4) => Array.from({ length: n }, (_, i) => `<div class="sk-row"><i class="sk av"></i><div class="grow"><i class="sk" style="width:${60 - i * 7}%"></i><i class="sk" style="width:${35 + i * 5}%"></i></div></div>`).join('');
+const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+// Las cifras grandes cuentan desde 0 al entrar en la pantalla.
+function countUp(root) {
+  if (reduced()) return;
+  $$('[data-count]', root).forEach(el => {
+    const to = +el.dataset.count; if (!(to > 0)) return;
+    const t0 = performance.now(), dur = 700;
+    const step = t => { const k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(2, -10 * k);
+      el.textContent = nfmt(k < 1 ? (Number.isInteger(to) ? Math.round(to * e) : to * e) : to); if (k < 1) requestAnimationFrame(step); };
+    el.textContent = '0'; requestAnimationFrame(step);
+  });
+}
 
 /* ── Hojas ─────────────────────────────────────── */
 function openSheet(html, { onClose } = {}) {
@@ -121,19 +135,40 @@ function openSheet(html, { onClose } = {}) {
   scrim.addEventListener('click', e => { if (e.target === scrim) closeSheet(); });
   scrim._onClose = onClose;
   document.body.appendChild(scrim);
+  dragToClose(scrim.firstElementChild);
   return scrim.firstElementChild;
 }
+// Arrastrar la hoja hacia abajo la cierra (si está arriba del todo).
+function dragToClose(sh) {
+  let y0 = null, dy = 0, t0 = 0;
+  sh.addEventListener('touchstart', e => {
+    y0 = sh.scrollTop <= 0 && !e.target.closest('input,textarea,select') ? e.touches[0].clientY : null; dy = 0; t0 = Date.now();
+  }, { passive: true });
+  sh.addEventListener('touchmove', e => {
+    if (y0 == null) return;
+    dy = Math.max(0, e.touches[0].clientY - y0);
+    sh.style.transition = 'none'; sh.style.transform = dy ? `translateY(${dy}px)` : '';
+    sh.parentElement.style.opacity = String(1 - Math.min(dy / sh.offsetHeight, 1) * .6);
+  }, { passive: true });
+  sh.addEventListener('touchend', () => {
+    if (y0 == null) return; y0 = null;
+    if (dy > 110 || (dy > 30 && dy / (Date.now() - t0) > .5)) return closeSheet();
+    sh.style.transition = 'transform .4s var(--spring)'; sh.style.transform = '';
+    sh.parentElement.style.transition = 'opacity .3s'; sh.parentElement.style.opacity = '';
+  });
+}
+addEventListener('keydown', e => { if (e.key === 'Escape') closeSheet(); });
 function closeSheet(instant) {
   $$('.scrim').forEach(s => {
     s._onClose?.(); s._onClose = null;
     if (instant) return s.remove();
-    s.classList.add('out'); setTimeout(() => s.remove(), 150);
+    s.classList.add('out'); setTimeout(() => s.remove(), 220);
   });
 }
 function confirmSheet({ title, text, ok = 'Confirmar' }) {
   return new Promise(res => {
     let done = false;
-    const sh = openSheet(`<h2>${esc(title)}</h2><p class="lead">${text}</p>
+    const sh = openSheet(`<h2>${esc(title)}</h2>${text ? `<p class="lead">${text}</p>` : ''}
       <button class="btn" data-ok>${esc(ok)}</button><div style="height:8px"></div><button class="btn soft" data-no>Cancelar</button>`,
       { onClose: () => { if (!done) res(false); } });
     $('[data-ok]', sh).onclick = () => { done = true; res(true); closeSheet(); };
@@ -160,6 +195,7 @@ async function boot() {
 function teardown() {
   if (S.channel) { sb.removeChannel(S.channel); S.channel = null; }
   Object.assign(S, { me: null, team: null, members: [], fines: [], credit: [], posts: [] });
+  lastRoute = null;
   Object.assign(S.liga, { comp: null, rounds: [], fixtures: [], round: null, loaded: null, picks: [], entries: [], rankRound: null, rankLoaded: null, ranking: [], draft: {} });
 }
 
@@ -179,14 +215,14 @@ async function renderAuth(mode = 'login') {
         <button type="button" data-mode="login" aria-pressed="${mode === 'login'}">Entrar</button>
         <button type="button" data-mode="signup" aria-pressed="${mode === 'signup'}">Crear cuenta</button>
       </div>
-      <div id="auth-pane"><p class="label" style="padding:24px 0">Cargando plantilla…</p></div>
+      <div id="auth-pane"><div style="margin:24px calc(var(--gut) * -1) 0">${skeleton(3)}</div></div>
       ${installHint()}
     </div></div>`;
   $$('[data-mode]').forEach(b => b.onclick = () => renderAuth(b.dataset.mode));
   bindInstall($('#app'));
   const { data, error } = await sb.rpc('team_roster', { p_slug: TEAM.slug });
   if (error) {
-    $('#auth-pane').innerHTML = `<p class="err" style="margin-top:20px">No se pudo cargar la plantilla. ${esc(errMsg(error))}</p><button class="btn line" id="retry">Reintentar</button>`;
+    $('#auth-pane').innerHTML = `<p class="err" style="margin-top:20px">${esc(errMsg(error))}</p><button class="btn line" id="retry">Reintentar</button>`;
     $('#retry').onclick = () => renderAuth(mode);
     return;
   }
@@ -198,9 +234,9 @@ const emailFor = id => `${id}@${EMAIL_DOMAIN}`;
 function paneLogin(roster) {
   const pane = $('#auth-pane');
   const list = roster.filter(p => p.claimed);
-  if (!list.length) { pane.innerHTML = `<p class="note" style="margin-top:20px">Aún no se ha registrado nadie. Pulsa <b>Crear cuenta</b> y busca tu nombre.</p>`; return; }
+  if (!list.length) { pane.innerHTML = `<div class="empty">Aún no hay cuentas.</div>`; return; }
   let sel = list.some(p => p.id === store.get('last')) ? store.get('last') : null;
-  pane.innerHTML = `<div class="rowlabel" style="padding:24px 0 6px">${icon('arrow-right')}<span>¿Quién eres?</span><span>${list.length}</span></div>
+  pane.innerHTML = `<div class="rowlabel" style="padding:24px 0 6px"><span>¿Quién eres?</span></div>
     ${pickGrid(list, sel)}
     <form id="login-form" ${sel ? '' : 'hidden'}>
       <input type="text" id="login-user" autocomplete="username" hidden>
@@ -217,10 +253,10 @@ function paneLogin(roster) {
   $$('.pick button', pane).forEach(b => b.onclick = () => choose(b.dataset.id));
   form.onsubmit = async e => {
     e.preventDefault();
-    const btn = $('button[type=submit]', form); btn.disabled = true;
+    const btn = $('button[type=submit]', form); busy(btn, true);
     const { error } = await sb.auth.signInWithPassword({ email: emailFor(sel), password: $('#login-pw').value });
-    btn.disabled = false;
-    if (error) { $('#login-err').textContent = /invalid/i.test(error.message) ? 'Contraseña incorrecta. Si no la recuerdas, pide a un admin que libere tu cuenta.' : errMsg(error); return; }
+    busy(btn, false);
+    if (error) { $('#login-err').textContent = /invalid/i.test(error.message) ? 'Contraseña incorrecta' : errMsg(error); return; }
     store.set('last', sel);
     await enterApp();
   };
@@ -229,13 +265,12 @@ function paneLogin(roster) {
 function paneSignup(roster) {
   const pane = $('#auth-pane');
   const list = roster.filter(p => !p.claimed);
-  if (!list.length) { pane.innerHTML = `<p class="note" style="margin-top:20px">Toda la plantilla tiene ya cuenta. Si falta tu nombre, pide a un admin que te añada.</p>`; return; }
+  if (!list.length) { pane.innerHTML = `<div class="empty">Toda la plantilla tiene cuenta.</div>`; return; }
   let sel = null;
-  pane.innerHTML = `<div class="rowlabel" style="padding:24px 0 6px">${icon('arrow-right')}<span>Busca tu nombre</span><span>${list.length} sin cuenta</span></div>
+  pane.innerHTML = `<div class="rowlabel" style="padding:24px 0 6px"><span>¿Quién eres?</span></div>
     ${pickGrid(list, null)}
     <form id="su-form" hidden>
       <input type="text" id="su-user" autocomplete="username" hidden>
-      <p class="note acc" id="su-who"></p>
       <div class="field"><label for="su-code">Código del equipo</label><input class="input" id="su-code" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="Está en el grupo del equipo" required></div>
       <div class="field"><label for="su-pw">Contraseña</label><input class="input" type="password" id="su-pw" autocomplete="new-password" minlength="6" required placeholder="Mínimo 6 caracteres"></div>
       <div class="field"><label for="su-pw2">Repite la contraseña</label><input class="input" type="password" id="su-pw2" autocomplete="new-password" minlength="6" required></div>
@@ -246,7 +281,6 @@ function paneSignup(roster) {
   $$('.pick button', pane).forEach(b => b.onclick = () => {
     sel = b.dataset.id;
     $$('.pick button', pane).forEach(x => x.setAttribute('aria-pressed', x === b));
-    $('#su-who').innerHTML = `Vas a crear la cuenta de <b>${esc(list.find(x => x.id === sel).name)}</b>.`;
     $('#su-user').value = emailFor(sel); form.hidden = false; $('#su-err').textContent = '';
     form.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
@@ -254,21 +288,21 @@ function paneSignup(roster) {
     e.preventDefault();
     const err = $('#su-err'), btn = $('button[type=submit]', form);
     const code = $('#su-code').value.trim().toUpperCase(), pw = $('#su-pw').value;
-    if (pw !== $('#su-pw2').value) { err.textContent = 'Las contraseñas no coinciden.'; return; }
-    btn.disabled = true;
-    const fail = m => { err.textContent = m; btn.disabled = false; };
+    if (pw !== $('#su-pw2').value) { err.textContent = 'Las contraseñas no coinciden'; return; }
+    busy(btn, true);
+    const fail = m => { err.textContent = m; busy(btn, false); };
     const { data, error } = await sb.functions.invoke('signup', { body: { member_id: sel, code, password: pw } });
     if (error) {
       let code = 'server';
       try { code = (await error.context.json()).error || code; } catch {}
       return fail({
-        bad_code: 'El código del equipo no es correcto.',
-        taken: 'Ese jugador ya tiene cuenta. Si eres tú, pide a un admin que la libere.',
-        not_found: 'Ese jugador ya no está en la plantilla.',
-        weak_password: 'La contraseña tiene que tener al menos 6 caracteres.',
-      }[code] || 'No se pudo crear la cuenta. Inténtalo de nuevo.');
+        bad_code: 'Código incorrecto',
+        taken: 'Ese jugador ya tiene cuenta',
+        not_found: 'Ese jugador ya no está en la plantilla',
+        weak_password: 'Mínimo 6 caracteres',
+      }[code] || 'No se pudo crear la cuenta');
     }
-    if (!data?.ok) return fail('No se pudo crear la cuenta. Inténtalo de nuevo.');
+    if (!data?.ok) return fail('No se pudo crear la cuenta');
     const { error: e2 } = await sb.auth.signInWithPassword({ email: emailFor(sel), password: pw });
     if (e2) return fail(errMsg(e2));
     store.set('last', sel);
@@ -279,13 +313,13 @@ function paneSignup(roster) {
 function installHint() {
   if (standalone()) return '';
   const ios = isIOS();
-  return `<div class="install">${icon('arrow-right')}<div class="grow">${ios ? 'Instálala: <b>Compartir</b> → <b>Añadir a pantalla de inicio</b>.' : 'Instálala en el móvil para abrirla como una app.'}</div>
+  return `<div class="install"><div class="grow">${ios ? '<b>Compartir</b> → <b>Añadir a pantalla de inicio</b>' : 'Instala la app'}</div>
     ${ios ? '' : '<button class="btn sm line" data-install>Instalar</button>'}</div>`;
 }
 function bindInstall(root) {
   const b = $('[data-install]', root); if (!b) return;
   b.onclick = async () => {
-    if (!S.installEvt) return toast('Abre el menú del navegador y elige «Instalar app».');
+    if (!S.installEvt) return toast('Menú del navegador → Instalar app');
     S.installEvt.prompt(); await S.installEvt.userChoice.catch(() => {}); S.installEvt = null;
   };
 }
@@ -378,36 +412,54 @@ function current() {
   if (h.startsWith('jugador/')) return { name: 'jugador', id: h.slice(8) };
   return { name: ['feed', 'plantilla', 'historial'].includes(h) || (h === 'quiniela' && S.liga.comp) ? h : 'multas' };
 }
-function route() { closeSheet(true); refresh(true); }
+// Cambio de pantalla con transición: la ficha entra y sale de lado; las pestañas, con un fundido.
+let lastRoute = null;
+function route() {
+  closeSheet(true);
+  const to = current().name, from = lastRoute; lastRoute = to;
+  const nav = to === 'jugador' && from && from !== 'jugador' ? 'push' : from === 'jugador' && to !== 'jugador' ? 'pop' : 'fade';
+  if (!from || reduced()) return refresh(true);
+  document.documentElement.dataset.nav = nav;
+  if (document.startViewTransition) {
+    document.startViewTransition(() => refresh(true)).finished.finally(() => delete document.documentElement.dataset.nav);
+  } else {
+    refresh(true);
+    const v = $('#view'); v.classList.remove('enter', 'push', 'pop'); void v.offsetWidth;
+    v.classList.add('enter'); if (nav !== 'fade') v.classList.add(nav);
+    v.addEventListener('animationend', () => v.classList.remove('enter', 'push', 'pop'), { once: true });
+  }
+}
 function refresh(fresh = false) {
   const view = $('#view'); if (!S.me || !view) return;
   const r = current(), y = view.scrollTop;
   $$('.tab').forEach(t => t.removeAttribute('aria-current'));
   $(`.tab[data-tab="${r.name === 'jugador' ? 'plantilla' : r.name}"]`)?.setAttribute('aria-current', 'page');
-  ({ multas: viewFines, feed: viewFeed, quiniela: viewQuiniela, plantilla: viewSquad, historial: viewHistory, jugador: viewProfile })[r.name](view, r);
+  const same = view.dataset.v === r.name + (r.id || '');
+  ({ multas: viewFines, feed: viewFeed, quiniela: viewQuiniela, plantilla: viewSquad, historial: viewHistory, jugador: viewProfile })[r.name](view, r, fresh || !same);
+  view.dataset.v = r.name + (r.id || '');
   view.scrollTop = fresh ? 0 : y;
+  if (fresh) countUp(view);
   if (r.name === 'feed' && S.posts[0]) store.set('feed-seen', S.posts[0].id);
   const dot = $('#feed-dot');
   if (dot) dot.hidden = !S.posts.some(p => p.id > Number(store.get('feed-seen') || 0) && p.author_id !== S.me.id);
 }
-function header(title, { sub, back, action } = {}) {
+function header(title, { back, action } = {}) {
   $('#head').innerHTML = `
     ${back ? `<button class="hbtn back" id="h-back" aria-label="Volver">${icon('chevron-left')}</button>` : ''}
-    <h1>${sub ? `<span class="sub">${esc(sub)}</span>` : ''}${esc(title)}</h1>
-    ${action ? `<button class="hbtn solid" id="h-act" aria-label="${esc(action.label)}">${icon('math-plus')}</button>` : ''}
+    <h1>${esc(title)}</h1>
+    ${action ? `<button class="hbtn ${action.icon ? '' : 'solid'}" id="h-act" aria-label="${esc(action.label)}">${icon(action.icon || 'math-plus')}</button>` : ''}
     <button class="hbtn" id="h-me" aria-label="Mi cuenta">${avatar(S.me)}</button>`;
   $('#h-me').onclick = meSheet;
   if (action) $('#h-act').onclick = action.fn;
   if (back) $('#h-back').onclick = () => history.length > 1 ? history.back() : (location.hash = 'plantilla');
 }
-const SUB = `${TEAM.label} · ${TEAM.season}`;
-const rowLabel = (a, b = '') => `<div class="rowlabel">${icon('arrow-right')}<span>${a}</span><span>${b}</span></div>`;
+const rowLabel = (a, b = '') => `<div class="rowlabel"><span>${a}</span><span>${b}</span></div>`;
 
 /* ════════════════════════════════════════════════
    MULTAS
    ════════════════════════════════════════════════ */
 function viewFines(view) {
-  header('Multas', { sub: SUB, action: { label: 'Nueva multa', fn: () => fineSheet() } });
+  header('Multas', { action: { label: 'Nueva multa', fn: () => fineSheet() } });
   const pend = S.fines.filter(f => !f.paid);
   const total = pend.reduce((s, f) => s + due(f), 0);
   const groups = new Map();
@@ -419,14 +471,13 @@ function viewFines(view) {
 
   view.innerHTML = `
     <section class="block" aria-label="Bote pendiente">
-      <div class="meta">${icon('arrow-right')}<span>Bote pendiente</span><span>${plural(pend.length, 'multa', 'multas')}</span></div>
-      <div class="amount big">${nfmt(total)}<small>€</small></div>
-      <div class="facts"><span>${plural(groups.size, 'jugador debe', 'jugadores deben')}</span>${x2 ? `<span>${x2} a ×2</span>` : ''}${x4 ? `<span>${x4} a ×4</span>` : ''}</div>
+      <div class="meta"><span>Bote</span><span>${plural(pend.length, 'multa', 'multas')}</span></div>
+      <div class="amount big"><span data-count="${round2(total)}">${nfmt(total)}</span><small>€</small></div>
+      ${x2 || x4 ? `<div class="facts">${x2 ? `<span>${x2} a ×2</span>` : ''}${x4 ? `<span>${x4} a ×4</span>` : ''}</div>` : ''}
     </section>
     <a class="item" href="#jugador/${S.me.id}">${avatar(S.me)}<div class="grow"><div class="t">Tú</div>
-      <div class="s">${mine.length ? plural(mine.length, 'multa pendiente', 'multas pendientes') : 'Al día'}${+S.me.credit > 0 ? ` · saldo ${eur(S.me.credit)}` : ''}</div></div><span class="v">${eur(myDue)}</span></a>
-    ${rowLabel('Pendientes', '×2 a los 15 días · ×4 a los 29')}
-    ${ordered.length ? `<div class="list">${ordered.map(debtor).join('')}</div>` : `<div class="empty"><b>0 €</b>Nadie debe nada. De momento.</div>`}`;
+      <div class="s">${mine.length ? plural(mine.length, 'multa', 'multas') : 'Al día'}${+S.me.credit > 0 ? ` · saldo ${eur(S.me.credit)}` : ''}</div></div><span class="v">${eur(myDue)}</span></a>
+    ${ordered.length ? rowLabel('Pendientes') + `<div class="list">${ordered.map(debtor).join('')}</div>` : `<div class="empty"><b>0 €</b>Nadie debe nada</div>`}`;
   $$('[data-fine]', view).forEach(b => b.onclick = () => fineActions(b.dataset.fine));
 }
 function debtor({ m, ff, tot }) {
@@ -447,19 +498,19 @@ function fineRow(f, indent = false) {
 function fineActions(id) {
   const f = S.fines.find(x => x.id === id); if (!f) return;
   const m = memberById(f.member_id);
-  const sh = openSheet(`<h2>${esc(f.reason || 'Multa')}</h2><p class="lead">${esc(m?.name)} · ${fmtDay(f.date)} · ${f.paid ? `pagada el ${fmtDay(f.paid_at)}` : f.kind === 'cobro' ? 'cobro, no se duplica' : mult(f) > 1 ? `multa a ×${mult(f)}` : 'multa'}</p>
+  const sh = openSheet(`<h2>${esc(f.reason || 'Multa')}</h2><p class="lead">${esc(m?.name)} · ${fmtDay(f.date)}${f.paid ? ` · pagada el ${fmtDay(f.paid_at)}` : f.kind === 'cobro' ? ' · cobro' : mult(f) > 1 ? ` · ×${mult(f)}` : ''}</p>
     <div class="menu">
-      ${f.paid ? '' : `<button data-a="pay">${icon('check')}Marcar como pagada<span class="end">${eur(due(f))}</span></button>`}
-      <button data-a="player">${icon('user-list')}Ver ficha de ${esc(firstName(m))}</button>
-      ${f.paid ? '' : `<button data-a="del">${icon('trash')}Borrar multa</button>`}
+      ${f.paid ? '' : `<button data-a="pay">${icon('check')}Pagar<span class="end">${eur(due(f))}</span></button>`}
+      <button data-a="player">${icon('user-list')}${esc(firstName(m))}</button>
+      ${f.paid ? '' : `<button data-a="del">${icon('trash')}Borrar</button>`}
     </div>`);
   $('[data-a=pay]', sh)?.addEventListener('click', () => paySheet(f));
   $('[data-a=player]', sh).onclick = () => { closeSheet(true); location.hash = `jugador/${f.member_id}`; };
   $('[data-a=del]', sh)?.addEventListener('click', async () => {
-    if (!await confirmSheet({ title: 'Borrar multa', text: `«${esc(f.reason || 'multa')}» de ${esc(m?.name)}. También desaparece del feed. Si se usó saldo, se devuelve.`, ok: 'Borrar' })) return;
+    if (!await confirmSheet({ title: '¿Borrar multa?', text: `«${esc(f.reason || 'multa')}» · ${esc(m?.name)}`, ok: 'Borrar' })) return;
     const { error } = await sb.rpc('delete_fine', { p_fine: f.id });
     if (error) return toast(errMsg(error));
-    toast('Multa borrada'); S.posts = S.posts.filter(p => p.fine_id !== f.id);
+    toast('Borrada'); S.posts = S.posts.filter(p => p.fine_id !== f.id);
     await Promise.all([loadData(), loadFeed()]); refresh();
   });
 }
@@ -470,46 +521,45 @@ function paySheet(f) {
   const sh = openSheet(`<h2>Pagar ${eur(toPay)}</h2><p class="lead">${esc(m?.name)} · ${esc(f.reason || 'multa')}</p>
     <div class="list" style="margin:0 calc(var(--gut) * -1) 20px">
       <div class="item"><div class="grow">Importe</div><span>${eur(base(f))}</span></div>
-      ${mult(f) > 1 ? `<div class="item"><div class="grow">Duplicada ×${mult(f)}</div><span>${eur(d)}</span></div>` : ''}
+      ${mult(f) > 1 ? `<div class="item"><div class="grow">×${mult(f)}</div><span>${eur(d)}</span></div>` : ''}
       ${useC > 0 ? `<div class="item"><div class="grow">Saldo a favor</div><span>−${eur(useC)}</span></div>` : ''}
     </div>
-    <div class="field"><label for="pay-cash">Dinero entregado (€)</label><input class="input" id="pay-cash" type="number" inputmode="decimal" min="0" step="0.5" value="${toPay}"></div>
+    <div class="field"><label for="pay-cash">Entregado (€)</label><input class="input" id="pay-cash" type="number" inputmode="decimal" min="0" step="0.5" value="${toPay}"></div>
     <p class="note acc" id="pay-extra" hidden></p><p class="err" id="pay-err"></p>
-    <button class="btn" id="pay-ok">Confirmar pago</button>`);
+    <button class="btn" id="pay-ok">Pagar</button>`);
   const inp = $('#pay-cash', sh), extra = $('#pay-extra', sh), err = $('#pay-err', sh), ok = $('#pay-ok', sh);
   const val = () => parseFloat(String(inp.value).replace(',', '.')) || 0;
   const upd = () => {
     const ex = round2(val() - toPay);
-    extra.hidden = !(ex > 0); extra.textContent = `Sobran ${eur(ex)}: quedan como saldo de ${firstName(m)} para la próxima multa.`;
-    err.textContent = val() < toPay ? `Faltan ${eur(toPay - val())} para saldarla.` : '';
+    extra.hidden = !(ex > 0); extra.textContent = `+${eur(ex)} de saldo para ${firstName(m)}`;
+    err.textContent = val() < toPay ? `Faltan ${eur(toPay - val())}` : '';
     ok.disabled = val() < toPay;
   };
   inp.oninput = upd; upd();
   ok.onclick = async () => {
-    ok.disabled = true;
+    busy(ok, true);
     const { error } = await sb.rpc('pay_fine', { p_fine: f.id, p_cash: val() });
-    if (error) { ok.disabled = false; err.textContent = errMsg(error); return; }
-    closeSheet(); toast(`Pagada. ${firstName(m)} respira.`); await loadData(); refresh();
+    if (error) { busy(ok, false); err.textContent = errMsg(error); return; }
+    closeSheet(); toast('Pagada'); await loadData(); refresh();
   };
 }
 
 const REASONS = ['Llegar tarde', 'Faltar a entreno', 'Olvidar equipación', 'Móvil en el vestuario', 'Tarjeta amarilla', 'Tarjeta roja'];
 function fineSheet(preset) {
   const pls = S.members.filter(m => m.active);
-  const sh = openSheet(`<h2>Nueva multa</h2><p class="lead">Sale en el feed. Si el jugador tiene saldo, se descuenta solo.</p>
+  const sh = openSheet(`<h2>Nueva multa</h2>
     <form id="nf">
-      <div class="field"><label for="nf-who">Jugador</label><select class="input" id="nf-who" required><option value="">Elige jugador</option>
+      <div class="field"><label for="nf-who">Jugador</label><select class="input" id="nf-who" required><option value=""></option>
         ${pls.map(p => `<option value="${p.id}" ${p.id === preset ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div>
-      <div class="field"><label for="nf-why">Motivo</label><input class="input" id="nf-why" maxlength="140" autocomplete="off" placeholder="¿Qué ha hecho?">
+      <div class="field"><label for="nf-why">Motivo</label><input class="input" id="nf-why" maxlength="140" autocomplete="off">
         <div class="chips">${REASONS.map(r => `<button type="button" class="chip" data-r="${esc(r)}">${esc(r)}</button>`).join('')}</div></div>
       <div class="pair">
         <div class="field"><label for="nf-amt">Importe (€)</label><input class="input" id="nf-amt" type="number" inputmode="decimal" min="0.5" step="0.5" value="1" required></div>
         <div class="field"><label for="nf-date">Fecha</label><input class="input" id="nf-date" type="date" value="${todayISO()}" max="${todayISO()}" required></div>
       </div>
-      <div class="field"><span class="label" style="color:var(--ink);font-weight:600">Tipo</span>
-        <div class="seg"><button type="button" data-k="multa" aria-pressed="true">Multa · se duplica</button><button type="button" data-k="cobro" aria-pressed="false">Cobro · fijo</button></div></div>
+      <div class="field"><div class="seg"><button type="button" data-k="multa" aria-pressed="true">Multa</button><button type="button" data-k="cobro" aria-pressed="false">Cobro fijo</button></div></div>
       <p class="err" id="nf-err"></p>
-      <button class="btn" type="submit">Poner multa</button>
+      <button class="btn" type="submit">Multar</button>
     </form>`);
   let kind = 'multa';
   $$('[data-r]', sh).forEach(b => b.onclick = () => { $('#nf-why', sh).value = b.dataset.r; $$('[data-r]', sh).forEach(x => x.setAttribute('aria-pressed', x === b)); });
@@ -517,13 +567,13 @@ function fineSheet(preset) {
   $('#nf', sh).onsubmit = async e => {
     e.preventDefault();
     const who = $('#nf-who', sh).value, amt = parseFloat(String($('#nf-amt', sh).value).replace(',', '.'));
-    if (!who) return $('#nf-err', sh).textContent = 'Elige a quién multar.';
-    if (!(amt > 0)) return $('#nf-err', sh).textContent = 'El importe tiene que ser mayor que 0.';
-    const btn = $('button[type=submit]', sh); btn.disabled = true;
+    if (!who) return $('#nf-err', sh).textContent = 'Elige jugador';
+    if (!(amt > 0)) return $('#nf-err', sh).textContent = 'Importe mayor que 0';
+    const btn = $('button[type=submit]', sh); busy(btn, true);
     const { data, error } = await sb.rpc('add_fine', { p_member: who, p_amount: amt, p_reason: $('#nf-why', sh).value, p_date: $('#nf-date', sh).value, p_kind: kind });
-    if (error) { btn.disabled = false; return $('#nf-err', sh).textContent = errMsg(error); }
+    if (error) { busy(btn, false); return $('#nf-err', sh).textContent = errMsg(error); }
     closeSheet();
-    toast(data?.paid ? `Multa a ${firstName(memberById(who))}, pagada con su saldo` : `Multa a ${firstName(memberById(who))}: ${eur(amt)}`);
+    toast(data?.paid ? 'Pagada con saldo' : `${firstName(memberById(who))} · ${eur(amt)}`);
     await Promise.all([loadData(), loadFeed()]); refresh();
   };
 }
@@ -531,17 +581,50 @@ function fineSheet(preset) {
 /* ════════════════════════════════════════════════
    FEED
    ════════════════════════════════════════════════ */
-function viewFeed(view) {
-  header('Feed', { sub: SUB, action: { label: 'Publicar partido', fn: () => postSheet() } });
-  if (!S.posts.length) {
-    view.innerHTML = `<div class="empty"><b>Nada aún</b>Publica tu primer partido con el botón +. Las multas nuevas también salen aquí.</div>`;
-    return;
-  }
-  view.innerHTML = S.posts.map(postCard).join('') +
-    (S.feedMore ? `<div class="btns" style="padding-bottom:10px"><button class="btn line" id="more">Ver anteriores</button></div>` : '');
-  bindPosts(view);
-  $('#more', view)?.addEventListener('click', async e => { e.target.disabled = true; await loadFeed(true); refresh(); });
+function viewFeed(view, r, fresh) {
+  header('Feed', { action: { label: 'Publicar partido', fn: () => postSheet() } });
+  if (!S.posts.length) { view.innerHTML = `<div class="empty"><b>Nada aún</b></div>`; return; }
+  const list = $('#feed', view);
+  if (fresh || !list) {
+    view.innerHTML = `<div id="feed"></div><div class="feed-end" id="feed-end"></div>`;
+    patchFeed($('#feed', view), false);
+  } else patchFeed(list, true);
+  moreOnScroll(view);
 }
+// Solo se sustituyen las publicaciones que han cambiado: así no se cortan las animaciones ni parpadean las fotos.
+function patchFeed(list, animate) {
+  const old = new Map($$('.post', list).map(el => [el.dataset.post, el]));
+  let prev = null;
+  S.posts.forEach(p => {
+    const html = postCard(p), key = String(p.id);
+    let el = old.get(key);
+    if (!el || el._html !== html) {
+      const t = document.createElement('template'); t.innerHTML = html.trim();
+      const n = t.content.firstElementChild; n._html = html;
+      if (!el && animate) n.classList.add('new');
+      if (el) el.replaceWith(n);
+      el = n; bindPost(el);
+    }
+    old.delete(key);
+    const want = prev ? prev.nextElementSibling : list.firstElementChild;
+    if (want !== el) list.insertBefore(el, want);
+    prev = el;
+  });
+  old.forEach(el => el.remove());
+}
+// Scroll infinito: al acercarse al final se carga la página siguiente.
+let feedObs, feedBusy = false;
+function moreOnScroll(view) {
+  feedObs?.disconnect();
+  const end = $('#feed-end', view); if (!end || !S.feedMore) return;
+  feedObs = new IntersectionObserver(async ([e]) => {
+    if (!e.isIntersecting || feedBusy || !S.feedMore) return;
+    feedBusy = true; await loadFeed(true); feedBusy = false;
+    if (current().name === 'feed') refresh();
+  }, { root: view, rootMargin: '800px 0px' });
+  feedObs.observe(end);
+}
+const likeBtn = (likes, liked) => `${icon(liked ? 'heart-fill' : 'heart')}<span class="n">${likes || ''}</span>`;
 function postCard(p) {
   const pl = memberById(p.player_id), au = memberById(p.author_id);
   const likes = p.post_likes || [], liked = likes.some(l => l.member_id === S.me.id);
@@ -553,41 +636,45 @@ function postCard(p) {
     if (p.goals) stats.push([p.goals, p.goals === 1 ? 'gol' : 'goles']);
     if (p.assists) stats.push([p.assists, p.assists === 1 ? 'asistencia' : 'asistencias']);
     if (p.saves) stats.push([p.saves, p.saves === 1 ? 'parada' : 'paradas']);
-    const res = p.score_for != null && p.score_against != null
-      ? `<span class="tag ${p.score_for > p.score_against ? 'acc' : ''}">${p.score_for > p.score_against ? 'Victoria' : p.score_for < p.score_against ? 'Derrota' : 'Empate'} ${p.score_for}–${p.score_against}</span>` : '';
+    const res = p.score_for != null && p.score_against != null ? `<span class="tag ${p.score_for > p.score_against ? 'acc' : ''}">${p.score_for}–${p.score_against}</span>` : '';
     const badges = [p.goals >= 3 && '<span class="tag acc">Hat-trick</span>', isGK(pl) && p.score_against === 0 && '<span class="tag acc">Portería a cero</span>'].filter(Boolean).join('');
     bodyHtml = `${stats.length ? `<div class="post-stats">${stats.map(([n, l]) => `<div><b>${n}</b><span>${l}</span></div>`).join('')}</div>` : ''}
-      <div class="post-match">${p.rival ? `vs ${esc(p.rival)}` : 'Partido'}${res}${badges}</div>
+      ${p.rival || res || badges ? `<div class="post-match">${p.rival ? `vs ${esc(p.rival)}` : ''}${res}${badges}</div>` : ''}
       ${p.body ? `<p class="post-body">${esc(p.body)}</p>` : ''}
-      ${p.photo_path ? `<img class="post-photo" src="${esc(publicUrl(p.photo_path))}" alt="" loading="lazy" ${p.photo_w ? `width="${p.photo_w}" height="${p.photo_h}"` : ''}>` : ''}`;
+      ${p.photo_path ? `<div class="post-media"><img class="post-photo" src="${esc(publicUrl(p.photo_path))}" alt="" loading="lazy" decoding="async" ${p.photo_w ? `width="${p.photo_w}" height="${p.photo_h}"` : ''}></div>` : ''}`;
   } else {
     const f = S.fines.find(x => x.id === p.fine_id);
-    bodyHtml = f ? `<button class="post-fine" data-fine="${f.id}"><div class="grow" style="text-align:left"><div style="font-weight:600">${esc(f.reason || 'Sin motivo')}</div>
-      <div class="label">${f.paid ? `Pagada el ${fmtDay(f.paid_at)}` : `Pendiente${mult(f) > 1 ? ` · ya va a ×${mult(f)}` : ''}`}${f.kind === 'cobro' ? ' · cobro' : ''}</div></div>
+    bodyHtml = f ? `<button class="post-fine" data-fine="${f.id}"><div class="grow" style="text-align:left"><div style="font-weight:600">${esc(f.reason || 'Multa')}${f.paid ? '' : multTag(mult(f))}</div>
+      <div class="label">${f.paid ? 'Pagada' : f.kind === 'cobro' ? 'Cobro' : 'Multa'}</div></div>
       <b>${eur(f.paid ? f.paid_total : due(f))}</b></button>` : '';
   }
-  const title = p.kind === 'fine' ? `Multa para ${esc(pl?.name)}` : esc(pl?.name || '¿?');
-  const by = p.author_id && p.author_id !== p.player_id ? ` · ${p.kind === 'fine' ? 'puesta' : 'publicado'} por ${esc(firstName(au))}` : '';
-  const likers = likes.map(l => firstName(memberById(l.member_id))).filter(Boolean);
+  const by = p.author_id && p.author_id !== p.player_id ? ` · ${esc(firstName(au))}` : '';
   return `<article class="post" data-post="${p.id}">
-    <a class="post-h" href="#jugador/${p.player_id}">${avatar(pl)}<div class="grow"><div class="t">${title}</div><div class="s">${ago(p.created_at)}${by}</div></div></a>
+    <a class="post-h" href="#jugador/${p.player_id}">${avatar(pl)}<div class="grow"><div class="t">${esc(pl?.name || '¿?')}</div><div class="s">${ago(p.created_at)}${by}</div></div></a>
     ${bodyHtml}
     <div class="post-actions">
-      <button data-like class="${liked ? 'liked' : ''}" aria-pressed="${liked}" aria-label="Kudos">${icon('heart')}${likes.length || ''}</button>
-      <button data-comments aria-label="Comentarios">${icon('comment')}${nComments || ''}</button>
+      <button data-like class="${liked ? 'liked' : ''}" aria-pressed="${liked}" aria-label="Me gusta">${likeBtn(likes.length, liked)}</button>
+      <button data-comments aria-label="Comentarios">${icon('comment')}<span class="n">${nComments || ''}</span></button>
       ${canDelete ? `<button class="more" data-more aria-label="Opciones">${icon('more-vertical-alt')}</button>` : ''}
     </div>
-    ${likers.length ? `<div class="kudos-by">Kudos de ${esc(likers.slice(0, 3).join(', '))}${likers.length > 3 ? ` y ${likers.length - 3} más` : ''}</div>` : ''}
   </article>`;
 }
-function bindPosts(root) {
-  $$('.post', root).forEach(el => {
-    const id = Number(el.dataset.post);
-    $('[data-like]', el).onclick = () => toggleLike(id);
-    $('[data-comments]', el).onclick = () => commentsSheet(id);
-    $('[data-more]', el)?.addEventListener('click', () => postMenu(id));
-    $('[data-fine]', el)?.addEventListener('click', e => fineActions(e.currentTarget.dataset.fine));
-    $('.post-photo', el)?.addEventListener('dblclick', () => toggleLike(id, true));
+function bindPost(el) {
+  const id = Number(el.dataset.post);
+  $('[data-like]', el).onclick = () => toggleLike(id);
+  $('[data-comments]', el).onclick = () => commentsSheet(id);
+  $('[data-more]', el)?.addEventListener('click', () => postMenu(id));
+  $('[data-fine]', el)?.addEventListener('click', e => fineActions(e.currentTarget.dataset.fine));
+  // Doble toque en la foto: corazón grande encima y me gusta.
+  let last = 0;
+  $('.post-media', el)?.addEventListener('click', e => {
+    const now = Date.now();
+    if (now - last < 320) {
+      const m = e.currentTarget; $('.burst', m)?.remove();
+      m.insertAdjacentHTML('beforeend', `<span class="burst">${icon('heart-fill')}</span>`);
+      $('.burst', m).addEventListener('animationend', ev => ev.target.remove?.(), { once: true });
+      toggleLike(id, true); last = 0;
+    } else last = now;
   });
 }
 async function toggleLike(id, onlyAdd = false) {
@@ -595,40 +682,45 @@ async function toggleLike(id, onlyAdd = false) {
   p.post_likes = p.post_likes || [];
   const liked = p.post_likes.some(l => l.member_id === S.me.id);
   if (liked && onlyAdd) return;
-  // Respuesta inmediata; si falla, se deshace.
+  // Respuesta inmediata en el propio botón; si falla, se deshace.
   p.post_likes = liked ? p.post_likes.filter(l => l.member_id !== S.me.id) : [...p.post_likes, { member_id: S.me.id }];
-  refresh();
+  const el = $(`.post[data-post="${id}"]`);
+  if (el) {
+    const b = $('[data-like]', el);
+    b.classList.toggle('liked', !liked); b.setAttribute('aria-pressed', !liked);
+    b.innerHTML = likeBtn(p.post_likes.length, !liked);
+    b.classList.remove('pop'); if (!liked) { void b.offsetWidth; b.classList.add('pop'); navigator.vibrate?.(8); }
+    el._html = postCard(p);
+  }
   const { error } = liked
     ? await sb.from('post_likes').delete().eq('post_id', id).eq('member_id', S.me.id)
     : await sb.from('post_likes').insert({ post_id: id, member_id: S.me.id, team_id: S.me.team_id });
   if (error) { toast(errMsg(error)); await loadFeed(); refresh(); }
 }
-function postMenu(id) {
+async function postMenu(id) {
   const p = S.posts.find(x => x.id === id); if (!p) return;
-  const sh = openSheet(`<h2>Publicación</h2><p class="lead">Al borrarla se restan sus goles, asistencias y el partido de la ficha de ${esc(firstName(memberById(p.player_id)))}.</p>
-    <div class="menu"><button data-del>${icon('trash')}Borrar publicación</button></div>`);
-  $('[data-del]', sh).onclick = async () => {
-    const { data: photo, error } = await sb.rpc('delete_post', { p_post: id });
-    if (error) return toast(errMsg(error));
-    if (photo) sb.storage.from('media').remove([photo]).catch(() => {});
-    closeSheet(); toast('Publicación borrada');
-    S.posts = S.posts.filter(x => x.id !== id);
-    await loadData(); refresh();
-  };
+  if (!await confirmSheet({ title: '¿Borrar publicación?', text: `Se restan sus datos de la ficha de ${esc(firstName(memberById(p.player_id)))}.`, ok: 'Borrar' })) return;
+  const { data: photo, error } = await sb.rpc('delete_post', { p_post: id });
+  if (error) return toast(errMsg(error));
+  if (photo) sb.storage.from('media').remove([photo]).catch(() => {});
+  toast('Borrada');
+  S.posts = S.posts.filter(x => x.id !== id);
+  await loadData(); refresh();
 }
 async function commentsSheet(id) {
   if (!S.posts.some(x => x.id === id)) return;
-  const sh = openSheet(`<h2>Comentarios</h2><div id="c-list"><p class="label" style="padding:12px 0">Cargando…</p></div>
-    <form class="comment-form" id="c-form"><textarea id="c-txt" rows="1" maxlength="500" placeholder="Escribe un comentario" aria-label="Comentario"></textarea>
+  const sh = openSheet(`<h2>Comentarios</h2><div id="c-list" style="margin:0 calc(var(--gut) * -1)">${skeleton(2)}</div>
+    <form class="comment-form" id="c-form"><textarea id="c-txt" rows="1" maxlength="500" placeholder="Comenta…" aria-label="Comentario"></textarea>
       <button class="hbtn solid" aria-label="Enviar">${icon('arrow-right')}</button></form>`);
   const draw = async () => {
     const { data, error } = await sb.from('post_comments').select('*').eq('post_id', id).order('id');
     if (error) return toast(errMsg(error));
+    $('#c-list', sh).style.margin = '';
     $('#c-list', sh).innerHTML = data.length ? data.map(c => { const m = memberById(c.member_id);
       const mine = c.member_id === S.me.id || S.me.is_admin;
       return `<div class="comment">${avatar(m, 'sm')}<div class="grow"><div class="t">${esc(m?.name)}<span>${ago(c.created_at)}</span></div><p>${esc(c.body)}</p></div>
         ${mine ? `<button class="hbtn" data-cdel="${c.id}" aria-label="Borrar comentario">${icon('trash')}</button>` : ''}</div>`; }).join('')
-      : `<p class="label" style="padding:12px 0">Sé el primero en comentar.</p>`;
+      : '';
     $$('[data-cdel]', sh).forEach(b => b.onclick = async () => {
       const { error: e2 } = await sb.from('post_comments').delete().eq('id', b.dataset.cdel);
       if (e2) return toast(errMsg(e2));
@@ -653,17 +745,17 @@ function postSheet() {
   const def = pls.some(p => p.id === S.me.id) ? S.me.id : '';
   const vals = { goals: 0, assists: 0, saves: 0, goals_conceded: 0 };
   let photo = null;
-  const sh = openSheet(`<h2>Publicar partido</h2><p class="lead">Se suma a las estadísticas del jugador. El equipo puede dar kudos y comentar.</p>
+  const sh = openSheet(`<h2>Partido</h2>
     <form id="np">
-      <div class="field"><label for="np-who">Jugador</label><select class="input" id="np-who" required><option value="">Elige jugador</option>
+      <div class="field"><label for="np-who">Jugador</label><select class="input" id="np-who" required><option value=""></option>
         ${pls.map(p => `<option value="${p.id}" ${p.id === def ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div>
-      <div class="field"><label for="np-rival">Rival</label><input class="input" id="np-rival" maxlength="60" placeholder="Contra quién" required></div>
-      <div class="field"><span class="label" style="color:var(--ink);font-weight:600">Resultado (opcional)</span>
+      <div class="field"><label for="np-rival">Rival</label><input class="input" id="np-rival" maxlength="60" required></div>
+      <div class="field"><span class="label" style="color:var(--ink);font-weight:600">Resultado</span>
         <div class="pair"><input class="input" id="np-for" type="number" inputmode="numeric" min="0" max="99" placeholder="Nosotros" aria-label="Goles del Torrenueva">
         <input class="input" id="np-against" type="number" inputmode="numeric" min="0" max="99" placeholder="Ellos" aria-label="Goles del rival"></div></div>
       <div class="steppers" id="np-steps"></div>
-      <div class="field"><label for="np-body">Comentario</label><textarea class="input" id="np-body" maxlength="500" placeholder="Cómo fue"></textarea></div>
-      <button type="button" class="photo-pick" id="np-photo">${icon('camera')}<span>Añadir foto</span></button>
+      <div class="field"><textarea class="input" id="np-body" maxlength="500" placeholder="¿Cómo fue?" aria-label="Comentario"></textarea></div>
+      <button type="button" class="photo-pick" id="np-photo">${icon('camera')}<span>Foto</span></button>
       <input type="file" id="np-file" accept="image/*" hidden>
       <p class="err" id="np-err"></p>
       <button class="btn" type="submit">Publicar</button>
@@ -678,18 +770,18 @@ function postSheet() {
   $('#np-photo', sh).onclick = () => $('#np-file', sh).click();
   $('#np-file', sh).onchange = e => {
     photo = e.target.files[0] || null;
-    $('#np-photo', sh).innerHTML = photo ? `<img src="${URL.createObjectURL(photo)}" alt=""><span>Foto lista · toca para cambiarla</span>` : `${icon('camera')}<span>Añadir foto</span>`;
+    $('#np-photo', sh).innerHTML = photo ? `<img src="${URL.createObjectURL(photo)}" alt=""><span>Cambiar</span>` : `${icon('camera')}<span>Foto</span>`;
   };
   $('#np', sh).onsubmit = async e => {
     e.preventDefault();
     const err = $('#np-err', sh), btn = $('button[type=submit]', sh);
     const who = $('#np-who', sh).value;
-    if (!who) return err.textContent = 'Elige el jugador.';
+    if (!who) return err.textContent = 'Elige jugador';
     const num = id => { const v = $(id, sh).value; return v === '' ? null : Math.max(0, Math.min(99, parseInt(v, 10))); };
-    btn.disabled = true; btn.textContent = photo ? 'Subiendo foto…' : 'Publicando…';
+    busy(btn, true);
     let up = null;
     try { if (photo) up = await uploadImage(photo, 'posts', IMG.post); }
-    catch (x) { btn.disabled = false; btn.textContent = 'Publicar'; return err.textContent = errMsg(x); }
+    catch (x) { busy(btn, false); return err.textContent = errMsg(x); }
     const { error } = await sb.rpc('create_match_post', {
       p_player: who, p_rival: $('#np-rival', sh).value, p_score_for: num('#np-for'), p_score_against: num('#np-against'),
       p_goals: vals.goals, p_assists: vals.assists, p_saves: vals.saves, p_conceded: vals.goals_conceded,
@@ -697,25 +789,26 @@ function postSheet() {
     });
     if (error) {
       if (up) sb.storage.from('media').remove([up.path]).catch(() => {});
-      btn.disabled = false; btn.textContent = 'Publicar'; return err.textContent = errMsg(error);
+      busy(btn, false); return err.textContent = errMsg(error);
     }
-    closeSheet(); toast('Publicado');
+    closeSheet();
     await Promise.all([loadData(), loadFeed()]);
-    if (current().name !== 'feed') location.hash = 'feed'; else refresh(true);
+    if (current().name !== 'feed') location.hash = 'feed'; else { refresh(); $('#view').scrollTo({ top: 0, behavior: 'smooth' }); }
   };
 }
 const stepper = (k, l, v) => `<div class="stepper"><span class="label">${l}</span><div class="ctl">
   <button type="button" data-dec="${k}" aria-label="Restar ${l}">−</button><output id="st-${k}">${v}</output><button type="button" data-inc="${k}" aria-label="Sumar ${l}">+</button></div></div>`;
 function bindSteppers(root, vals) {
-  $$('[data-inc]', root).forEach(b => b.onclick = () => { const k = b.dataset.inc; vals[k]++; $(`#st-${k}`, root).textContent = vals[k]; });
-  $$('[data-dec]', root).forEach(b => b.onclick = () => { const k = b.dataset.dec; vals[k] = Math.max(0, vals[k] - 1); $(`#st-${k}`, root).textContent = vals[k]; });
+  const set = (k, v) => { vals[k] = v; const o = $(`#st-${k}`, root); o.textContent = v; o.classList.remove('bump'); void o.offsetWidth; o.classList.add('bump'); };
+  $$('[data-inc]', root).forEach(b => b.onclick = () => set(b.dataset.inc, vals[b.dataset.inc] + 1));
+  $$('[data-dec]', root).forEach(b => b.onclick = () => set(b.dataset.dec, Math.max(0, vals[b.dataset.dec] - 1)));
 }
 
 /* ════════════════════════════════════════════════
    HISTORIAL
    ════════════════════════════════════════════════ */
 function viewHistory(view) {
-  header('Historial', { sub: SUB });
+  header('Historial');
   const paid = S.fines.filter(f => f.paid).sort((a, b) => (b.paid_at || '').localeCompare(a.paid_at || ''));
   const season = paid.filter(f => (f.paid_at || '') >= SEASON_START);
   const sum = arr => arr.reduce((s, f) => s + (+f.paid_total || 0), 0);
@@ -726,15 +819,15 @@ function viewHistory(view) {
   const who = S.hist.who;
 
   view.innerHTML = `<div class="nums">
-      <div><span class="label">Recaudado</span><b>${eur(sum(season))}</b></div>
+      <div><span class="label">Recaudado</span><b><span data-count="${round2(sum(season))}">${nfmt(sum(season))}</span> €</b></div>
       <div><span class="label">Este mes</span><b>${eur(sum(season.filter(f => monthKey(f.paid_at) === thisMonth)))}</b></div>
-      <div><span class="label">Pagadas</span><b>${season.length}</b></div></div>
-    ${top.length ? rowLabel('Más ha aportado', 'temporada') + `<div class="list">${top.map(([id, v]) => { const m = memberById(id);
+      <div><span class="label">Pagadas</span><b data-count="${season.length}">${season.length}</b></div></div>
+    ${top.length ? rowLabel('Ranking') + `<div class="list">${top.map(([id, v]) => { const m = memberById(id);
       return `<a class="item" href="#jugador/${id}">${avatar(m, 'sm')}<div class="grow"><div class="t">${esc(m?.name)}</div><div class="bar"><i style="width:${Math.max(4, v / max * 100)}%"></i></div></div><span class="v">${eur(v)}</span></a>`; }).join('')}</div>` : ''}
     ${rowLabel('Movimientos')}
     <div style="padding:0 var(--gut)">
-      <div class="seg"><button type="button" data-t="paid" aria-pressed="${S.hist.tab === 'paid'}">Multas pagadas</button><button type="button" data-t="credit" aria-pressed="${S.hist.tab === 'credit'}">Saldo a favor</button></div>
-      <select class="input" id="h-who" aria-label="Filtrar por jugador" style="margin-top:10px"><option value="">Todo el equipo</option>
+      <div class="seg"><button type="button" data-t="paid" aria-pressed="${S.hist.tab === 'paid'}">Pagadas</button><button type="button" data-t="credit" aria-pressed="${S.hist.tab === 'credit'}">Saldo</button></div>
+      <select class="input" id="h-who" aria-label="Filtrar por jugador" style="margin-top:10px"><option value="">Todos</option>
         ${S.members.map(m => `<option value="${m.id}" ${m.id === who ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>
     </div>
     <div id="h-list" style="margin-top:6px"></div>`;
@@ -743,16 +836,16 @@ function viewHistory(view) {
   const box = $('#h-list', view);
   if (S.hist.tab === 'paid') {
     const rows = paid.filter(f => !who || f.member_id === who);
-    if (!rows.length) return box.innerHTML = `<div class="empty">Aún no hay multas pagadas${who ? ' de este jugador' : ''}.</div>`;
+    if (!rows.length) return box.innerHTML = `<div class="empty">Nada por aquí</div>`;
     const byMonth = new Map();
     rows.forEach(f => { const k = monthKey(f.paid_at); if (!byMonth.has(k)) byMonth.set(k, []); byMonth.get(k).push(f); });
     box.innerHTML = [...byMonth].map(([k, ff]) => `<div class="month"><span>${esc(k)}</span><span>${eur(sum(ff))}</span></div>` + ff.map(f => { const m = memberById(f.member_id);
       return `<button class="item" data-fine="${f.id}">${avatar(m, 'sm')}<div class="grow"><div class="t">${esc(m?.name)} <span class="mute" style="font-weight:400">${esc(f.reason || 'sin motivo')}</span>${multTag(f.paid_mult)}</div>
-        <div class="s">${f.kind === 'cobro' ? 'Cobro' : 'Multa'} del ${fmtDay(f.date)} · pagada el ${fmtDay(f.paid_at)}</div></div><span class="v">${eur(f.paid_total)}</span></button>`; }).join('')).join('');
+        <div class="s">${fmtDay(f.paid_at)}${f.kind === 'cobro' ? ' · cobro' : ''}</div></div><span class="v">${eur(f.paid_total)}</span></button>`; }).join('')).join('');
     $$('[data-fine]', box).forEach(b => b.onclick = () => fineActions(b.dataset.fine));
   } else {
     const rows = S.credit.filter(c => !who || c.member_id === who);
-    if (!rows.length) return box.innerHTML = `<div class="empty">Sin movimientos. Cuando alguien paga de más, aparece aquí.</div>`;
+    if (!rows.length) return box.innerHTML = `<div class="empty">Nada por aquí</div>`;
     box.innerHTML = `<div class="list">${rows.map(c => { const m = memberById(c.member_id);
       return `<div class="item">${avatar(m, 'sm')}<div class="grow"><div class="t">${esc(m?.name)}</div><div class="s">${esc(c.reason)} · ${fmtDay(c.created_at)}</div></div><span class="v">${c.delta > 0 ? '+' : '−'}${eur(Math.abs(c.delta))}</span></div>`; }).join('')}</div>`;
   }
@@ -775,7 +868,7 @@ const fmtDeadline = iso => new Date(iso).toLocaleString('es-ES', { ...TZ, weekda
   + new Date(iso).toLocaleTimeString('es-ES', { ...TZ, hour: '2-digit', minute: '2-digit' });
 function timeLeft(iso) {
   const m = Math.max(0, Math.floor((Date.parse(iso) - Date.now()) / 6e4)), d = Math.floor(m / 1440), h = Math.floor(m % 1440 / 60);
-  return d ? `quedan ${d} d ${h} h` : h ? `quedan ${h} h ${m % 60} min` : `quedan ${m} min`;
+  return d ? `${d} d ${h} h` : h ? `${h} h ${m % 60} min` : `${m} min`;
 }
 // Nombre corto del equipo: el de competitions.short_names o el oficial en minúsculas.
 const teamName = n => S.liga.comp?.short_names?.[n] || n.toLowerCase().replace(/(^|[\s/("-])(\p{L})/gu, (_, a, b) => a + b.toUpperCase());
@@ -820,15 +913,15 @@ async function loadRanking() {
 
 function viewQuiniela(view) {
   const L = S.liga;
-  header('Quiniela', { sub: SUB });
+  header('Quiniela', { action: { label: 'Reglas', icon: 'info', fn: rulesSheet } });
   view.innerHTML = `<div style="padding:4px var(--gut) 0"><div class="seg">${Q_TABS.map(([k, l]) => `<button type="button" data-lt="${k}" aria-pressed="${L.tab === k}">${l}</button>`).join('')}</div></div>
     <div id="q-body"></div>`;
   $$('[data-lt]', view).forEach(b => b.onclick = () => { L.tab = b.dataset.lt; refresh(true); });
   const box = $('#q-body', view);
-  if (!L.rounds.length) return box.innerHTML = `<div class="empty"><b>Sin jornadas</b>Aún no se ha cargado el calendario.</div>`;
+  if (!L.rounds.length) return box.innerHTML = `<div class="empty"><b>Sin jornadas</b></div>`;
   const pending = L.tab === 'jornada' ? L.loaded !== L.round : L.rankLoaded !== (L.rankRound ?? 'total');
   if (pending) {
-    box.innerHTML = `<p class="label" style="padding:24px var(--gut)">Cargando…</p>`;
+    box.innerHTML = `<div style="padding-top:16px">${skeleton(6)}</div>`;
     (L.tab === 'jornada' ? loadRound() : loadRanking()).then(() => current().name === 'quiniela' && refresh());
     return;
   }
@@ -838,13 +931,12 @@ function viewQuiniela(view) {
 /* ── Jornada abierta ── */
 function quinielaRound(box) {
   const L = S.liga, r = roundById(L.round);
-  if (!r) return box.innerHTML = `<div class="empty"><b>Sin jornada</b>No hay ninguna jornada abierta. La siguiente se abrirá cuando se cargue el calendario.</div>`;
+  if (!r) return box.innerHTML = `<div class="empty"><b>Sin jornada</b></div>`;
   const fx = fixturesOf(r.id), bet = fx.filter(f => !f.ours), ours = fx.find(f => f.ours);
   const oursRow = ours ? `<div class="fx ours"><div class="fx-teams"><span>${esc(teamName(ours.home))}</span><span>${esc(teamName(ours.away))}</span></div>
       <div class="fx-res">${score(ours) ? `<b>${score(ours)}</b>` : ''}<span class="label">No entra</span></div></div>` : '';
   box.innerHTML = `<div class="rnav"><div><b>Jornada ${r.num}</b><span>${fmtRoundDay(r.match_date)}</span></div></div>`
-    + (acceptsPicks(r) ? quinielaOpen(r, bet) : quinielaLive(r, bet)) + oursRow
-    + `<p class="label" style="padding:14px var(--gut)">Signo acertado: 3 puntos · doble acertado: 1 · máximo ${MAX_DOUBLES} dobles. Nuestro partido no entra; los aplazados se anulan. La jornada se cierra el domingo a las 22:00 y se abre la siguiente.</p>`;
+    + (acceptsPicks(r) ? quinielaOpen(r, bet) : quinielaLive(r, bet)) + oursRow;
   if (S.me.is_admin) $$('[data-fx]', box).forEach(b => b.addEventListener('click', e => {
     if (!e.target.closest('[data-s]')) fixtureSheet(L.fixtures.find(f => f.id === +b.dataset.fx));
   }));
@@ -862,17 +954,16 @@ function quinielaOpen(r, bet) {
   const players = S.members.filter(m => m.active && m.user_id);
   const entered = new Set(L.entries.map(e => e.member_id));
   return `<section class="block">
-      <div class="meta">${icon('time')}<span>Cierra el ${esc(fmtDeadline(r.deadline))}</span><span>${timeLeft(r.deadline)}</span></div>
+      <div class="meta"><span>Cierra ${esc(fmtDeadline(r.deadline))}</span><span>${timeLeft(r.deadline)}</span></div>
       <div class="amount big">${filled}<small>/${live.length}</small></div>
-      <div class="facts"><span>${dbl}/${MAX_DOUBLES} dobles</span><span>${isSaved ? (dirty ? 'Cambios sin guardar' : 'Entregada') : 'Sin entregar'}</span></div>
+      <div class="facts"><span>${dbl}/${MAX_DOUBLES} dobles</span><span>${isSaved ? (dirty ? 'Sin guardar' : 'Entregada') : 'Sin entregar'}</span></div>
     </section>
     <div class="list">${bet.map(f => f.void
       ? `<div class="fx" data-fx="${f.id}"><div class="fx-teams"><span>${esc(teamName(f.home))}</span><span>${esc(teamName(f.away))}</span></div><div class="fx-res"><span class="tag soft">Anulado</span></div></div>`
       : `<div class="fx" data-fx="${f.id}"><div class="fx-teams"><span>${esc(teamName(f.home))}</span><span>${esc(teamName(f.away))}</span>${f.kickoff ? `<small>${esc(fmtKick(f.kickoff))}</small>` : ''}</div>
         <div class="signs" role="group" aria-label="Pronóstico">${SIGNS.map(s => `<button type="button" data-s="${s}" aria-pressed="${(draft[f.id] || '').includes(s)}">${s}</button>`).join('')}</div></div>`).join('')}</div>
-    <div class="btns"><button class="btn" id="q-save" ${done && (dirty || !isSaved) ? '' : 'disabled'}>${isSaved ? (dirty ? 'Guardar cambios' : 'Quiniela entregada') : 'Entregar quiniela'}</button></div>
-    <p class="label" style="padding:10px var(--gut) 0">${done ? 'Puedes cambiarla hasta el cierre.' : `Te faltan ${plural(live.length - filled, 'partido', 'partidos')}. Hay que rellenarla entera.`}</p>
-    ${rowLabel('Entregadas', `${entered.size} de ${players.length}`)}
+    <div class="btns"><button class="btn" id="q-save" ${done && (dirty || !isSaved) ? '' : 'disabled'}>${!done ? `Faltan ${live.length - filled}` : isSaved ? (dirty ? 'Guardar' : `${icon('check')}Entregada`) : 'Entregar'}</button></div>
+    ${rowLabel('Entregadas', `${entered.size}/${players.length}`)}
     <div class="who">${players.map(m => `<span class="${entered.has(m.id) ? 'in' : ''}">${avatar(m, 'sm')}${esc(firstName(m))}</span>`).join('')}</div>`;
 }
 
@@ -886,20 +977,20 @@ function bindQuiniela(box, r, bet) {
       if (cur.includes(s)) next = cur.filter(x => x !== s);
       else if (!cur.length) next = [s];
       else if (cur.length === 1) {
-        if (bet.filter(f => !f.void && draft[f.id]?.length === 2).length >= MAX_DOUBLES) return toast(`Ya tienes ${MAX_DOUBLES} dobles. Quita uno antes.`);
+        if (bet.filter(f => !f.void && draft[f.id]?.length === 2).length >= MAX_DOUBLES) return toast(`Máximo ${MAX_DOUBLES} dobles`);
         next = [...cur, s];
-      } else return toast('Como mucho dos signos por partido.');
+      } else return toast('Máximo 2 signos');
       const v = SIGNS.filter(x => next.includes(x)).join('');
       if (v) draft[id] = v; else delete draft[id];
       refresh();
     });
   });
   $('#q-save', box)?.addEventListener('click', async e => {
-    e.target.disabled = true;
+    const b = e.currentTarget; busy(b, true);
     const picks = Object.fromEntries(bet.filter(f => !f.void).map(f => [f.id, draft[f.id]]));
     const { error } = await sb.rpc('save_picks', { p_round: r.id, p_picks: picks });
-    if (error) { toast(errMsg(error)); e.target.disabled = false; return; }
-    toast('Quiniela entregada'); await loadRound(); refresh();
+    if (error) { toast(errMsg(error)); busy(b, false); return; }
+    navigator.vibrate?.(12); await loadRound(); refresh();
   });
 }
 
@@ -915,47 +1006,53 @@ function quinielaLive(r, bet) {
   const pickCell = p => !p ? '<i>·</i>' : `<i class="${p.points == null ? '' : p.points ? 'hit' : 'miss'}">${esc(p.signs)}</i>`;
   const cols = `grid-template-columns:minmax(0,1fr) repeat(${bet.length},28px) 34px`;
   return `<section class="block">
-      <div class="meta">${icon('lock')}<span>${mine ? 'Tus puntos' : 'No la entregaste'}</span><span>${played} de ${live.length} resultados</span></div>
-      <div class="amount big">${mine ? total(S.me.id) : '—'}<small>${mine ? 'pts' : ''}</small></div>
-      <div class="facts"><span>Pronósticos cerrados</span><span>Resultados el domingo a las 22:00</span></div>
+      <div class="meta"><span>${mine ? 'Tus puntos' : 'Sin entregar'}</span><span>${played}/${live.length}</span></div>
+      <div class="amount big">${mine ? `<span data-count="${total(S.me.id)}">${total(S.me.id)}</span>` : '—'}<small>${mine ? 'pts' : ''}</small></div>
     </section>
     <div class="list">${bet.map((f, n) => { const p = mine?.[f.id];
       return `<div class="fx" data-fx="${f.id}"><span class="fx-n">${n + 1}</span><div class="fx-teams"><span>${esc(teamName(f.home))}</span><span>${esc(teamName(f.away))}</span></div>
-        <div class="fx-res">${f.void ? '<span class="tag soft">Anulado</span>' : score(f) ? `<b>${score(f)}</b>` : '<span class="label">Pendiente</span>'}</div>
+        <div class="fx-res">${f.void ? '<span class="tag soft">Anulado</span>' : score(f) ? `<b>${score(f)}</b>` : '<span class="label">—</span>'}</div>
         <div class="pk">${pickCell(p)}${p?.points ? `<small>+${p.points}</small>` : ''}</div></div>`; }).join('')}</div>
-    ${rowLabel('Pronósticos del equipo', plural(rows.length, 'jugador', 'jugadores'))}
+    ${rowLabel('Equipo', rows.length)}
     ${rows.length ? `<div class="qgrid"><div class="qrow head" style="${cols}"><span></span>${bet.map((_, n) => `<span>${n + 1}</span>`).join('')}<span>Pts</span></div>
       ${rows.map(id => { const m = memberById(id);
         return `<div class="qrow ${id === S.me.id ? 'me' : ''}" style="${cols}"><span class="nm">${esc(firstName(m))}</span>${bet.map(f => pickCell(byMember.get(id)[f.id])).join('')}<b>${total(id)}</b></div>`; }).join('')}</div>`
-      : `<div class="empty">Nadie entregó la quiniela de esta jornada.</div>`}`;
+      : `<div class="empty">Nadie la entregó</div>`}`;
 }
 
 /* ── Clasificación de la quiniela: total o por jornada (solo jornadas cerradas) ── */
 function quinielaRanking(box) {
   const L = S.liga, rounds = closedRounds().reverse();
-  if (!rounds.length) return box.innerHTML = `<div class="empty"><b>0 pts</b>La clasificación empieza cuando se cierre la primera jornada, el domingo a las 22:00.</div>`;
+  if (!rounds.length) return box.innerHTML = `<div class="empty"><b>0 pts</b></div>`;
   const sel = roundById(L.rankRound);
   const picker = `<div style="padding:16px var(--gut) 0"><select class="input" id="rk-round" aria-label="Jornada">
       <option value="">Total</option>${rounds.map(r => `<option value="${r.id}" ${r.id === L.rankRound ? 'selected' : ''}>Jornada ${r.num} · ${fmtRoundDay(r.match_date)}</option>`).join('')}</select></div>`;
   const rk = [...L.ranking].sort((a, b) => b.points - a.points || b.hits3 - a.hits3 || a.doubles - b.doubles);
   let body;
-  if (!rk.length) body = `<div class="empty">Nadie entregó la quiniela ${sel ? 'de esta jornada' : 'todavía'}.</div>`;
+  if (!rk.length) body = `<div class="empty">Nadie la entregó</div>`;
   else {
     const lead = rk[0], same = (a, b) => a.points === b.points && a.hits3 === b.hits3 && a.doubles === b.doubles;
     const top = rk.filter(x => same(x, lead)).map(x => firstName(memberById(x.member_id)) || '¿?');
-    const title = sel ? (top.length > 1 ? `Empate en la jornada ${sel.num}` : `Ganador de la jornada ${sel.num}`) : top.length > 1 ? 'Líderes' : 'Líder';
+    const title = sel ? `Jornada ${sel.num}` : top.length > 1 ? 'Líderes' : 'Líder';
     let pos = 0;
     body = `<section class="block" style="margin-top:16px">
-        <div class="meta">${icon('trophy')}<span>${title}</span><span>${sel ? fmtRoundDay(sel.match_date) : plural(rounds.length, 'jornada', 'jornadas')}</span></div>
-        <div class="amount big">${lead.points}<small>pts</small></div>
+        <div class="meta"><span>${title}</span><span>${sel ? fmtRoundDay(sel.match_date) : plural(rounds.length, 'jornada', 'jornadas')}</span></div>
+        <div class="amount big"><span data-count="${lead.points}">${lead.points}</span><small>pts</small></div>
         <div class="facts"><span>${esc(top.join(', '))}</span><span>${plural(+lead.hits, 'acierto', 'aciertos')}</span></div></section>
       <div class="list">${rk.map((x, n) => { const m = memberById(x.member_id);
         if (!rk[n - 1] || !same(rk[n - 1], x)) pos = n + 1;
         return `<a class="item" href="#jugador/${x.member_id}"><span class="pos">${pos}</span>${avatar(m, 'sm')}<div class="grow"><div class="t">${esc(m?.name || '¿?')}</div>
           <div class="s">${plural(+x.hits, 'acierto', 'aciertos')} · ${plural(+x.hits3, 'pleno', 'plenos')}${sel ? '' : ` · ${plural(+x.rounds, 'jornada', 'jornadas')}`}</div></div><span class="v">${x.points}</span></a>`; }).join('')}</div>`;
   }
-  box.innerHTML = picker + body + `<p class="label" style="padding:14px var(--gut)">Signo acertado: 3 puntos; doble acertado: 1. Empate a puntos: gana quien tenga más plenos (signo único acertado) y, después, quien haya usado menos dobles.</p>`;
+  box.innerHTML = picker + body;
   $('#rk-round', box).onchange = e => { L.rankRound = e.target.value ? +e.target.value : null; refresh(); };
+}
+
+function rulesSheet() {
+  openSheet(`<h2>Reglas</h2><div class="list" style="margin:0 calc(var(--gut) * -1)">
+    ${[['Signo acertado', '3 pts'], ['Doble acertado', '1 pt'], ['Dobles', `máx. ${MAX_DOUBLES}`], ['Cierre', 'viernes 14:00'], ['Resultados', 'domingo 22:00'],
+      ['Empate', 'más plenos, menos dobles']].map(([a, b]) => `<div class="item"><div class="grow">${a}</div><span class="mute">${b}</span></div>`).join('')}</div>
+    <p class="label" style="padding-top:14px">Nuestro partido no entra. Los aplazados se anulan.</p>`);
 }
 
 /* ── Admin: corregir un resultado o anular un partido ── */
@@ -963,21 +1060,21 @@ function fixtureSheet(f) {
   if (!f || !S.me.is_admin) return;
   const r = roundById(f.round_id);
   const sh = openSheet(`<h2>${esc(teamName(f.home))} – ${esc(teamName(f.away))}</h2>
-    <p class="lead">Jornada ${r.num} · ${f.manual ? 'corregido a mano: la sincronización no lo toca' : 'se actualiza solo desde la federación'}</p>
+    <p class="lead">Jornada ${r.num} · ${f.manual ? 'manual' : 'automático'}</p>
     <div class="field"><span class="label">Resultado</span><div class="pair">
       <input class="input" id="fx-h" type="number" inputmode="numeric" min="0" max="99" placeholder="${esc(teamName(f.home))}" value="${f.home_goals ?? ''}" aria-label="Goles de ${esc(teamName(f.home))}">
       <input class="input" id="fx-a" type="number" inputmode="numeric" min="0" max="99" placeholder="${esc(teamName(f.away))}" value="${f.away_goals ?? ''}" aria-label="Goles de ${esc(teamName(f.away))}"></div></div>
     ${f.ours ? '' : `<div class="field"><span class="label">Quiniela</span><div class="seg"><button type="button" data-v="0" aria-pressed="${!f.void}">Cuenta</button><button type="button" data-v="1" aria-pressed="${f.void}">Anulado</button></div></div>`}
     <p class="err" id="fx-err"></p>
     <button class="btn" id="fx-save">Guardar</button>
-    ${f.manual ? '<div style="height:8px"></div><button class="btn soft" id="fx-auto">Volver a automático</button>' : ''}`);
+    ${f.manual ? '<div style="height:8px"></div><button class="btn soft" id="fx-auto">Automático</button>' : ''}`);
   let isVoid = f.void;
   $$('[data-v]', sh).forEach(b => b.onclick = () => { isVoid = b.dataset.v === '1'; $$('[data-v]', sh).forEach(x => x.setAttribute('aria-pressed', x === b)); });
   const num = id => { const v = $(id, sh).value; return v === '' ? null : Math.max(0, Math.min(99, parseInt(v, 10))); };
   const save = async manual => {
     const { error } = await sb.rpc('admin_set_fixture', { p_fixture: f.id, p_home: num('#fx-h'), p_away: num('#fx-a'), p_void: isVoid, p_manual: manual });
     if (error) return $('#fx-err', sh).textContent = errMsg(error);
-    closeSheet(); toast(manual ? 'Partido guardado' : 'Se actualizará desde la federación');
+    closeSheet(); toast('Guardado');
     S.liga.loaded = null; await loadLiga(); refresh();
   };
   $('#fx-save', sh).onclick = () => save(true);
@@ -991,27 +1088,26 @@ const POSITIONS = ['Portero', 'Cierre', 'Ala', 'Pívot', 'Universal', 'Entrenado
 const isStaff = m => ['Entrenador', 'Staff'].includes(m?.position);
 function viewSquad(view) {
   const act = S.members.filter(m => m.active);
-  header('Plantilla', { sub: SUB });
+  header('Plantilla');
   const sort = (a, b) => (a.dorsal ?? 999) - (b.dorsal ?? 999) || a.name.localeCompare(b.name, 'es');
   const gk = act.filter(isGK).sort(sort);
   const staff = act.filter(isStaff).sort(sort);
   const field = act.filter(m => !isGK(m) && !isStaff(m)).sort(sort);
   const players = [...gk, ...field];
   const lead = k => players.filter(m => m[k] > 0).sort((a, b) => b[k] - a[k])[0];
-  const leader = (m, k, l) => `<a href="${m ? `#jugador/${m.id}` : '#plantilla'}"><span class="label">${l}</span><b>${m ? m[k] : 0}</b><span class="who">${m ? `${avatar(m, 'sm')}<span>${esc(m.name)}</span>` : '<span class="mute">Nadie aún</span>'}</span></a>`;
-  const card = m => `<a class="pc" href="#jugador/${m.id}">${m.user_id ? '<i class="reg" title="Tiene cuenta"></i>' : ''}${m.dorsal != null ? `<span class="num">${m.dorsal}</span>` : ''}
+  const leader = (m, k, l) => `<a href="${m ? `#jugador/${m.id}` : '#plantilla'}"><span class="label">${l}</span><b data-count="${m ? m[k] : 0}">${m ? m[k] : 0}</b><span class="by">${m ? `${avatar(m, 'sm')}<span>${esc(m.name)}</span>` : '<span class="mute">—</span>'}</span></a>`;
+  const card = m => `<a class="pc" href="#jugador/${m.id}">${m.dorsal != null ? `<span class="num">${m.dorsal}</span>` : ''}
     ${avatar(m)}<span class="n">${esc(m.name)}</span><span class="p">${esc(m.position || 'Jugador')}</span></a>`;
-  const group = (t, list, add) => list.length || add ? rowLabel(t, list.length) + `<div class="squad">${list.map(card).join('')}${add ? `<button class="pc add" id="add-player">${icon('user-add')}Añadir jugador</button>` : ''}</div>` : '';
-  view.innerHTML = `${rowLabel('Líderes', 'temporada')}<div class="leaders">${leader(lead('goals'), 'goals', 'Goles')}${leader(lead('assists'), 'assists', 'Asistencias')}</div>
-    ${group('Porteros', gk)}${group('Jugadores', field, S.me.is_admin)}${group('Cuerpo técnico', staff)}
-    <p class="label" style="padding:16px var(--gut)">El punto de color indica que ya tiene cuenta en la app: ${act.filter(m => m.user_id).length} de ${act.length}.</p>`;
+  const group = (t, list, add) => list.length || add ? rowLabel(t, list.length) + `<div class="squad">${list.map(card).join('')}${add ? `<button class="pc add" id="add-player" aria-label="Añadir jugador">${icon('math-plus')}</button>` : ''}</div>` : '';
+  view.innerHTML = `<div class="leaders">${leader(lead('goals'), 'goals', 'Goles')}${leader(lead('assists'), 'assists', 'Asistencias')}</div>
+    ${group('Porteros', gk)}${group('Jugadores', field, S.me.is_admin)}${group('Cuerpo técnico', staff)}`;
   $('#add-player', view)?.addEventListener('click', () => memberSheet());
 }
 
 function viewProfile(view, r) {
   const m = memberById(r.id);
-  header(m ? firstName(m) : 'Jugador', { back: true, sub: 'Plantilla' });
-  if (!m) return view.innerHTML = `<div class="empty">Este jugador ya no está en la plantilla.</div>`;
+  header(m ? firstName(m) : '', { back: true });
+  if (!m) return view.innerHTML = `<div class="empty">Ya no está en la plantilla</div>`;
   const pend = S.fines.filter(f => !f.paid && f.member_id === m.id);
   const paidSeason = S.fines.filter(f => f.paid && f.member_id === m.id && (f.paid_at || '') >= SEASON_START);
   const debt = pend.reduce((s, f) => s + due(f), 0);
@@ -1026,23 +1122,22 @@ function viewProfile(view, r) {
   view.innerHTML = `
     <section class="hero">${m.photo_url ? `<img src="${esc(m.photo_url)}" alt="Foto de ${esc(m.name)}">` : `<span class="emoji">${esc(m.emoji || '⚽')}</span>`}
       ${m.dorsal != null ? `<span class="dorsal" aria-label="Dorsal ${m.dorsal}">${m.dorsal}</span>` : ''}
-      <button class="edit" id="photo-btn">${icon('camera')}${m.photo_url ? 'Cambiar foto' : 'Poner foto'}</button>
+      <button class="edit" id="photo-btn" aria-label="${m.photo_url ? 'Cambiar foto' : 'Poner foto'}">${icon('camera')}</button>
       <input type="file" id="photo-in" accept="image/*" hidden></section>
     <div class="id"><h2>${esc(m.name)}</h2><p>${esc(m.position || 'Jugador')}${m.nickname ? ` · «${esc(m.nickname)}»` : ''}${m.is_admin ? ' · <span class="tag">Admin</span>' : ''}</p></div>
     ${m.bio ? `<p class="bio">${esc(m.bio)}</p>` : ''}
-    ${cells.length ? rowLabel('Estadísticas', gk ? 'portero' : 'temporada') + `<div class="nums">${cells.map(([l, v]) => `<div><span class="label">${l}</span><b>${v}</b></div>`).join('')}</div>` : ''}
-    <div class="btns"><button class="btn line" id="edit-btn">${icon('pen')}Editar ficha</button><button class="btn line" id="fine-btn">${icon('math-plus')}Multar</button></div>
+    ${cells.length ? rowLabel('Estadísticas') + `<div class="nums">${cells.map(([l, v]) => `<div><span class="label">${l}</span><b ${typeof v === 'number' ? `data-count="${v}"` : ''}>${v}</b></div>`).join('')}</div>` : ''}
+    <div class="btns"><button class="btn line" id="edit-btn">${icon('pen')}Editar</button><button class="btn line" id="fine-btn">${icon('math-plus')}Multar</button></div>
     ${rowLabel('Caja')}
     <div class="nums"><div><span class="label">Debe</span><b>${eur(debt)}</b></div><div><span class="label">Ha pagado</span><b>${eur(paidSeason.reduce((s, f) => s + (+f.paid_total || 0), 0))}</b></div><div><span class="label">Saldo</span><b>${eur(m.credit)}</b></div></div>
     ${pend.length ? `<div class="list" style="border-top:0">${pend.map(f => fineRow(f)).join('')}</div>` : ''}
-    ${posts.length ? rowLabel('Partidos publicados', posts.length) + `<div class="list">${posts.map(p => `<a class="item" href="#feed"><div class="grow"><div class="t">vs ${esc(p.rival || '—')}${p.goals >= 3 ? ' <span class="tag acc">Hat-trick</span>' : ''}</div>
-      <div class="s">${[p.goals && plural(p.goals, 'gol', 'goles'), p.assists && plural(p.assists, 'asistencia', 'asistencias'), p.saves && plural(p.saves, 'parada', 'paradas')].filter(Boolean).join(' · ') || 'Sin datos'} · ${ago(p.created_at)}</div></div>
-      <span class="label">${plural((p.post_likes || []).length, 'kudo', 'kudos')}</span></a>`).join('')}</div>` : ''}
+    ${posts.length ? rowLabel('Partidos', posts.length) + `<div class="list">${posts.map(p => `<a class="item" href="#feed"><div class="grow"><div class="t">vs ${esc(p.rival || '—')}${p.goals >= 3 ? ' <span class="tag acc">Hat-trick</span>' : ''}</div>
+      <div class="s">${[p.goals && plural(p.goals, 'gol', 'goles'), p.assists && plural(p.assists, 'asistencia', 'asistencias'), p.saves && plural(p.saves, 'parada', 'paradas'), ago(p.created_at)].filter(Boolean).join(' · ')}</div></div>
+      ${(p.post_likes || []).length ? `<span class="label" style="display:flex;align-items:center;gap:4px">${icon('heart-fill').replace('class="ic"', 'class="ic" style="width:16px;height:16px;color:var(--like)"')}${p.post_likes.length}</span>` : ''}</a>`).join('')}</div>` : ''}
     ${admin ? rowLabel('Admin') + `<div class="menu" style="margin:0">
-      ${m.user_id ? `<button data-adm="release">${icon('lock')}Liberar cuenta<span class="end">olvidó la contraseña</span></button>` : ''}
+      ${m.user_id ? `<button data-adm="release">${icon('lock')}Liberar cuenta</button>` : ''}
       <button data-adm="admin">${icon('shield')}${m.is_admin ? 'Quitar admin' : 'Hacer admin'}</button>
-      <button data-adm="off">${icon('user-remove')}Dar de baja</button></div>` : ''}
-    <p class="label" style="padding:18px var(--gut)">${m.user_id ? 'Tiene cuenta en la app' : 'Aún no se ha registrado'} · ficha editada el ${fmtDay(m.updated_at)}</p>`;
+      <button data-adm="off">${icon('user-remove')}Dar de baja</button></div>` : ''}`;
 
   $$('[data-fine]', view).forEach(b => b.onclick = () => fineActions(b.dataset.fine));
   $('#edit-btn', view).onclick = () => memberSheet(m);
@@ -1050,15 +1145,15 @@ function viewProfile(view, r) {
   $('#photo-btn', view).onclick = () => $('#photo-in', view).click();
   $('#photo-in', view).onchange = async e => {
     const file = e.target.files[0]; if (!file) return;
-    toast('Subiendo foto…');
+    const pb = $('#photo-btn', view); pb.classList.add('busy'); pb.disabled = true;
     try {
       const up = await uploadImage(file, 'avatars', IMG.avatar);
       const { error } = await sb.from('members').update({ photo_url: publicUrl(up.path) }).eq('id', m.id);
       if (error) { sb.storage.from('media').remove([up.path]).catch(() => {}); throw error; }
       const old = pathFromUrl(m.photo_url);
       if (old) sb.storage.from('media').remove([old]).catch(() => {});   // no acumular fotos viejas
-      toast('Foto actualizada'); await loadData(); refresh();
-    } catch (x) { toast(errMsg(x)); }
+      await loadData(); refresh();
+    } catch (x) { toast(errMsg(x)); pb.classList.remove('busy'); pb.disabled = false; }
   };
   $$('[data-adm]', view).forEach(b => b.onclick = () => adminAction(b.dataset.adm, m));
 }
@@ -1066,14 +1161,14 @@ function viewProfile(view, r) {
 async function adminAction(kind, m) {
   let error;
   if (kind === 'release') {
-    if (!await confirmSheet({ title: 'Liberar cuenta', text: `${esc(m.name)} tendrá que volver a registrarse con el código del equipo. Sus multas y estadísticas se quedan.`, ok: 'Liberar' })) return;
-    ({ error } = await sb.rpc('admin_release_member', { p_member: m.id })); if (!error) toast('Cuenta liberada');
+    if (!await confirmSheet({ title: '¿Liberar cuenta?', text: `${esc(m.name)} tendrá que registrarse de nuevo.`, ok: 'Liberar' })) return;
+    ({ error } = await sb.rpc('admin_release_member', { p_member: m.id })); if (!error) toast('Liberada');
   } else if (kind === 'admin') {
     ({ error } = await sb.rpc('admin_set_admin', { p_member: m.id, p_admin: !m.is_admin })); if (!error) toast(m.is_admin ? 'Ya no es admin' : 'Ahora es admin');
   } else {
-    if (!await confirmSheet({ title: 'Dar de baja', text: `${esc(m.name)} sale de la plantilla y pierde el acceso. Su historial se conserva.`, ok: 'Dar de baja' })) return;
+    if (!await confirmSheet({ title: '¿Dar de baja?', text: `${esc(m.name)} pierde el acceso. Su historial se conserva.`, ok: 'Dar de baja' })) return;
     ({ error } = await sb.rpc('admin_set_active', { p_member: m.id, p_active: false }));
-    if (!error) { toast('Baja registrada'); location.hash = 'plantilla'; }
+    if (!error) location.hash = 'plantilla';
   }
   if (error) return toast(errMsg(error));
   await loadData(); refresh();
@@ -1085,8 +1180,7 @@ function memberSheet(m) {
   const KEYS = [['matches', 'Partidos'], ['goals', 'Goles'], ['assists', 'Asistencias'], ['mvps', 'MVP'], ['yellow_cards', 'Amarillas'], ['red_cards', 'Rojas']];
   const GK = [['saves', 'Paradas'], ['goals_conceded', 'Encajados'], ['clean_sheets', 'A cero']];
   const vals = Object.fromEntries([...KEYS, ...GK].map(([k]) => [k, m[k] || 0]));
-  const sh = openSheet(`<h2>${isNew ? 'Añadir jugador' : 'Editar ficha'}</h2>
-    <p class="lead">${isNew ? 'Aparece en la plantilla y podrá crear su cuenta con el código del equipo.' : 'Cualquiera del equipo puede corregirla. Los partidos del feed ya suman solos.'}</p>
+  const sh = openSheet(`<h2>${isNew ? 'Nuevo jugador' : 'Editar ficha'}</h2>
     <form id="mf">
       <div class="field"><label for="mf-name">Nombre</label><input class="input" id="mf-name" maxlength="40" required value="${esc(m.name)}"></div>
       <div class="pair"><div class="field"><label for="mf-nick">Apodo</label><input class="input" id="mf-nick" maxlength="40" value="${esc(m.nickname || '')}"></div>
@@ -1095,10 +1189,10 @@ function memberSheet(m) {
           ${POSITIONS.map(p => `<option ${p === m.position ? 'selected' : ''}>${p}</option>`).join('')}</select></div>
         <div class="field"><label for="mf-dorsal">Dorsal</label><input class="input" id="mf-dorsal" type="number" inputmode="numeric" min="0" max="99" value="${m.dorsal ?? ''}"></div></div>
       ${isNew ? '' : `<span class="label" style="color:var(--ink);font-weight:600">Estadísticas</span><div class="steppers" id="mf-steps" style="margin-top:8px"></div>
-        <div class="field"><label for="mf-bio">Sobre él</label><textarea class="input" id="mf-bio" maxlength="280" placeholder="Pierna buena, frase mítica…">${esc(m.bio || '')}</textarea></div>
+        <div class="field"><label for="mf-bio">Sobre él</label><textarea class="input" id="mf-bio" maxlength="280">${esc(m.bio || '')}</textarea></div>
         ${m.photo_url ? '<button type="button" class="btn soft" id="mf-nophoto" style="margin-bottom:16px">Quitar foto</button>' : ''}`}
       <p class="err" id="mf-err"></p>
-      <button class="btn" type="submit">${isNew ? 'Añadir a la plantilla' : 'Guardar'}</button>
+      <button class="btn" type="submit">${isNew ? 'Añadir' : 'Guardar'}</button>
     </form>`);
   const drawSteps = () => {
     const box = $('#mf-steps', sh); if (!box) return;
@@ -1107,21 +1201,21 @@ function memberSheet(m) {
   };
   $('#mf-pos', sh).onchange = drawSteps; drawSteps();
   let dropPhoto = false;
-  $('#mf-nophoto', sh)?.addEventListener('click', e => { dropPhoto = true; e.target.textContent = 'La foto se quitará al guardar'; e.target.disabled = true; });
+  $('#mf-nophoto', sh)?.addEventListener('click', e => { dropPhoto = true; e.target.textContent = 'Sin foto'; e.target.disabled = true; });
   $('#mf', sh).onsubmit = async e => {
     e.preventDefault();
     const d = $('#mf-dorsal', sh).value;
     const row = { name: $('#mf-name', sh).value.trim(), nickname: $('#mf-nick', sh).value.trim() || null, emoji: $('#mf-emoji', sh).value.trim() || '⚽',
       position: $('#mf-pos', sh).value || null, dorsal: d === '' ? null : Math.max(0, Math.min(99, parseInt(d, 10))) };
-    if (!row.name) return $('#mf-err', sh).textContent = 'El nombre no puede ir vacío.';
+    if (!row.name) return $('#mf-err', sh).textContent = 'Falta el nombre';
     if (!isNew) { Object.assign(row, vals, { bio: $('#mf-bio', sh).value.trim() || null }); if (dropPhoto) row.photo_url = null; }
-    const btn = $('button[type=submit]', sh); btn.disabled = true;
+    const btn = $('button[type=submit]', sh); busy(btn, true);
     const { data, error } = isNew
       ? await sb.from('members').insert({ ...row, team_id: S.me.team_id }).select('id').single()
       : await sb.from('members').update(row).eq('id', m.id).select('id').single();
-    if (error) { btn.disabled = false; return $('#mf-err', sh).textContent = errMsg(error); }
+    if (error) { busy(btn, false); return $('#mf-err', sh).textContent = errMsg(error); }
     if (dropPhoto) { const old = pathFromUrl(m.photo_url); if (old) sb.storage.from('media').remove([old]).catch(() => {}); }
-    closeSheet(); toast(isNew ? `${row.name} ya está en la plantilla` : 'Ficha guardada');
+    closeSheet();
     await loadData();
     if (isNew) location.hash = `jugador/${data.id}`; else refresh();
   };
@@ -1131,12 +1225,12 @@ function memberSheet(m) {
 async function meSheet() {
   const me = S.me, pushOn = await pushState();
   const sh = openSheet(`<div style="display:flex;gap:14px;align-items:center;margin-bottom:20px">${avatar(me, 'lg')}
-      <div><h2 style="margin:0">${esc(me.name)}</h2><p class="label">${esc(TEAM.name)} · ${esc(TEAM.season)}${me.is_admin ? ' · admin' : ''}</p></div></div>
+      <div><h2 style="margin:0">${esc(me.name)}</h2><p class="label">${esc(TEAM.label)} · ${esc(TEAM.season)}</p></div></div>
     <div class="menu">
       <a href="#jugador/${me.id}" data-close>${icon('user-list')}Mi ficha</a>
       <button data-a="push">${icon('bell')}Notificaciones<span class="switch ${pushOn ? 'on' : ''}" role="switch" aria-checked="${pushOn}"></span></button>
-      <button data-a="pw">${icon('key')}Cambiar contraseña</button>
-      ${me.is_admin ? `<div class="item" style="padding-left:var(--gut)">${icon('image')}<div class="grow">Espacio de fotos<div class="s" id="st-use">Calculando…</div></div></div>` : ''}
+      <button data-a="pw">${icon('key')}Contraseña</button>
+      ${me.is_admin ? `<div class="item" style="padding-left:var(--gut)">${icon('image')}<div class="grow">Fotos<div class="s" id="st-use"><i class="sk" style="width:60%;margin-top:4px"></i></div></div></div>` : ''}
       <button data-a="out">${icon('log-off')}Cerrar sesión</button>
     </div>${installHint()}`);
   bindInstall(sh);
@@ -1151,21 +1245,22 @@ async function meSheet() {
   if (me.is_admin) {
     const { data } = await sb.rpc('storage_usage');
     const u = data?.[0], el = $('#st-use', sh);
-    if (u && el) el.textContent = `${(u.bytes / 1048576).toFixed(1).replace('.', ',')} MB en ${plural(+u.files, 'foto', 'fotos')} · ${(u.bytes / STORAGE_QUOTA * 100).toFixed(1).replace('.', ',')} % de 1 GB`;
+    if (u && el) el.textContent = `${(u.bytes / 1048576).toFixed(1).replace('.', ',')} MB · ${(u.bytes / STORAGE_QUOTA * 100).toFixed(1).replace('.', ',')} % de 1 GB`;
   }
 }
 function passwordSheet() {
-  const sh = openSheet(`<h2>Contraseña</h2><p class="lead">Elige una nueva. Se cambia al momento.</p>
+  const sh = openSheet(`<h2>Contraseña</h2>
     <form id="pw"><input type="text" autocomplete="username" value="${esc(emailFor(S.me.id))}" hidden>
-      <div class="field"><label for="pw1">Nueva contraseña</label><input class="input" id="pw1" type="password" minlength="6" autocomplete="new-password" required></div>
+      <div class="field"><label for="pw1">Nueva</label><input class="input" id="pw1" type="password" minlength="6" autocomplete="new-password" required></div>
       <div class="field"><label for="pw2">Repítela</label><input class="input" id="pw2" type="password" minlength="6" autocomplete="new-password" required></div>
-      <p class="err" id="pw-err"></p><button class="btn" type="submit">Cambiar contraseña</button></form>`);
+      <p class="err" id="pw-err"></p><button class="btn" type="submit">Guardar</button></form>`);
   $('#pw', sh).onsubmit = async e => {
     e.preventDefault();
-    if ($('#pw1', sh).value !== $('#pw2', sh).value) return $('#pw-err', sh).textContent = 'Las contraseñas no coinciden.';
+    if ($('#pw1', sh).value !== $('#pw2', sh).value) return $('#pw-err', sh).textContent = 'No coinciden';
+    const btn = $('button[type=submit]', sh); busy(btn, true);
     const { error } = await sb.auth.updateUser({ password: $('#pw1', sh).value });
-    if (error) return $('#pw-err', sh).textContent = errMsg(error);
-    closeSheet(); toast('Contraseña cambiada');
+    if (error) { busy(btn, false); return $('#pw-err', sh).textContent = errMsg(error); }
+    closeSheet(); toast('Guardada');
   };
 }
 
@@ -1184,15 +1279,14 @@ async function saveSub(sub) {
 }
 async function enablePush() {
   if (!pushSupported()) {
-    toast(isIOS() && !standalone() ? 'En iPhone, primero instala la app (Compartir → Añadir a pantalla de inicio) y actívalas desde ahí.' : 'Este navegador no admite notificaciones.');
+    toast(isIOS() && !standalone() ? 'Instala la app primero' : 'No disponible en este navegador');
     return false;
   }
   try {
-    if (await Notification.requestPermission() !== 'granted') { toast('Permiso denegado. Actívalo en los ajustes del móvil.'); return false; }
+    if (await Notification.requestPermission() !== 'granted') { toast('Permiso denegado'); return false; }
     const reg = await navigator.serviceWorker.ready;
     const sub = await reg.pushManager.getSubscription() || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(VAPID_PUBLIC) });
     await saveSub(sub);
-    toast('Notificaciones activadas');
     return true;
   } catch (e) { toast(errMsg(e)); return false; }
 }
@@ -1201,7 +1295,6 @@ async function disablePush(silent) {
     const sub = await Promise.race([pushSub(), new Promise(r => setTimeout(() => r(null), 800))]); if (!sub) return true;
     await sb.rpc('delete_push_subscription', { p_endpoint: sub.endpoint });
     await sub.unsubscribe();
-    if (!silent) toast('Notificaciones desactivadas');
     return true;
   } catch (e) { if (!silent) toast(errMsg(e)); return false; }
 }
