@@ -92,7 +92,7 @@ function errMsg(e) {
     BAD_AMOUNT: 'El importe tiene que ser mayor que 0.', CANNOT_RELEASE_SELF: 'No puedes liberar tu propia cuenta.',
     POST_NOT_FOUND: 'Esa publicación ya no existe.', FINE_POST: 'Las multas se borran desde la pantalla de Multas.',
     QUINIELA_CLOSED: 'La quiniela de esta jornada ya está cerrada.', QUINIELA_INCOMPLETE: 'Tienes que rellenar todos los partidos.',
-    TOO_MANY_DOUBLES: 'Solo puedes usar 4 dobles por jornada.', BAD_PICK: 'Algún pronóstico no es válido.',
+    TOO_MANY_DOUBLES: 'Has puesto más dobles de los que permite esta jornada.', BAD_PICK: 'Algún pronóstico no es válido.',
     ROUND_NOT_FOUND: 'Esa jornada no existe.', ROUND_NOT_OPEN: 'Esa jornada ya no está abierta.', FIXTURE_NOT_FOUND: 'Ese partido no existe.', BAD_SCORE: 'Pon los goles de los dos equipos o de ninguno.',
     'row-level security': 'No tienes permiso para hacer eso.',
     'exceeded the maximum allowed size': 'La foto pesa demasiado. Prueba con otra.',
@@ -854,12 +854,13 @@ function viewHistory(view) {
 /* ════════════════════════════════════════════════
    QUINIELA
    Todos los partidos de la jornada salvo el nuestro; 3 puntos por signo acertado,
-   1 por doble acertado, máximo 4 dobles; se entrega entera antes del viernes a las 14:00.
+   1 por doble acertado; el máximo de dobles es de cada competición (senior 4, juvenil 1) y una
+   jornada puede fijar el suyo. Se entrega entera antes del viernes a las 14:00.
    Solo hay una jornada abierta: el domingo a las 22:00 se leen los resultados de la
    federación (GitHub Action → ffcm-sync), se cierra y se abre la siguiente.
    ════════════════════════════════════════════════ */
 const SIGNS = ['1', 'X', '2'];
-const MAX_DOUBLES = 4;
+const maxDoubles = r => r?.max_doubles ?? S.liga.comp?.max_doubles ?? 4;
 const Q_TABS = [['jornada', 'Jornada'], ['ranking', 'Clasificación']];
 const TZ = { timeZone: 'Europe/Madrid' };
 const fmtRoundDay = iso => new Date(iso + 'T12:00:00').toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' });
@@ -956,7 +957,7 @@ function quinielaOpen(r, bet) {
   return `<section class="block">
       <div class="meta"><span>Cierra ${esc(fmtDeadline(r.deadline))}</span><span>${timeLeft(r.deadline)}</span></div>
       <div class="amount big">${filled}<small>/${live.length}</small></div>
-      <div class="facts"><span>${dbl}/${MAX_DOUBLES} dobles</span><span>${isSaved ? (dirty ? 'Sin guardar' : 'Entregada') : 'Sin entregar'}</span></div>
+      <div class="facts"><span>${dbl}/${maxDoubles(r)} ${maxDoubles(r) === 1 ? 'doble' : 'dobles'}</span><span>${isSaved ? (dirty ? 'Sin guardar' : 'Entregada') : 'Sin entregar'}</span></div>
     </section>
     <div class="list">${bet.map(f => f.void
       ? `<div class="fx" data-fx="${f.id}"><div class="fx-teams"><span>${esc(teamName(f.home))}</span><span>${esc(teamName(f.away))}</span></div><div class="fx-res"><span class="tag soft">Anulado</span></div></div>`
@@ -977,7 +978,8 @@ function bindQuiniela(box, r, bet) {
       if (cur.includes(s)) next = cur.filter(x => x !== s);
       else if (!cur.length) next = [s];
       else if (cur.length === 1) {
-        if (bet.filter(f => !f.void && draft[f.id]?.length === 2).length >= MAX_DOUBLES) return toast(`Máximo ${MAX_DOUBLES} dobles`);
+        const max = maxDoubles(r);
+        if (bet.filter(f => !f.void && draft[f.id]?.length === 2).length >= max) return toast(max ? `Máximo ${plural(max, 'doble', 'dobles')}` : 'En esta jornada no hay dobles');
         next = [...cur, s];
       } else return toast('Máximo 2 signos');
       const v = SIGNS.filter(x => next.includes(x)).join('');
@@ -1050,7 +1052,7 @@ function quinielaRanking(box) {
 
 function rulesSheet() {
   openSheet(`<h2>Reglas</h2><div class="list" style="margin:0 calc(var(--gut) * -1)">
-    ${[['Signo acertado', '3 pts'], ['Doble acertado', '1 pt'], ['Dobles', `máx. ${MAX_DOUBLES}`], ['Cierre', 'viernes 14:00'], ['Resultados', 'domingo 22:00'],
+    ${[['Signo acertado', '3 pts'], ['Doble acertado', '1 pt'], ['Dobles', `máx. ${maxDoubles(roundById(S.liga.round))}`], ['Cierre', 'viernes 14:00'], ['Resultados', 'domingo 22:00'],
       ['Empate', 'más plenos, menos dobles']].map(([a, b]) => `<div class="item"><div class="grow">${a}</div><span class="mute">${b}</span></div>`).join('')}</div>
     <p class="label" style="padding-top:14px">Nuestro partido no entra. Los aplazados se anulan.</p>`);
 }

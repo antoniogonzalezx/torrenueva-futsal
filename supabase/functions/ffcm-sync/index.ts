@@ -15,18 +15,23 @@ const FFCM = "https://www.ffcm.es/pnfg/NPcd";
 const PRIMARIA = 1000120;
 
 type Comp = { id: string; team_id: string; ffcm_temporada: number; ffcm_competicion: number; ffcm_grupo: number };
-type Round = { id: number; num: number; match_date: string; closed: boolean };
+type Round = { id: number; num: number; match_date: string; closed: boolean;
+  ffcm_competicion: number | null; ffcm_grupo: number | null; ffcm_jornada: number | null };
 type Fixture = { id: number; round_id: number; home: string; away: string; kickoff: string | null;
   home_goals: number | null; away_goals: number | null; status: string; ours: boolean; manual: boolean };
 
 const norm = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toUpperCase().replace(/\s+/g, " ").trim();
 
 // Páginas de la federación: el calendario (toda la temporada con resultados, una sola página) y,
-// si falta algo, la de resultados de la jornada.
-const pages = (c: Comp, num: number) => [
-  `${FFCM}/NFG_VisCalendario_Vis?cod_primaria=${PRIMARIA}&codtemporada=${c.ffcm_temporada}&codcompeticion=${c.ffcm_competicion}&codgrupo=${c.ffcm_grupo}&CodJornada=1`,
-  `${FFCM}/NFG_CmpJornada?cod_primaria=${PRIMARIA}&CodTemporada=${c.ffcm_temporada}&CodGrupo=${c.ffcm_grupo}&CodCompeticion=${c.ffcm_competicion}&CodJornada=${num}`,
-];
+// si falta algo, la de resultados de la jornada. Una jornada puede leer de otra liga (rounds.ffcm_*):
+// la jornada 0 del juvenil usa partidos del senior.
+const pages = (c: Comp, r: Pick<Round, "num" | "ffcm_competicion" | "ffcm_grupo" | "ffcm_jornada">) => {
+  const comp = r.ffcm_competicion ?? c.ffcm_competicion, grupo = r.ffcm_grupo ?? c.ffcm_grupo, jornada = r.ffcm_jornada ?? r.num;
+  return [
+    `${FFCM}/NFG_VisCalendario_Vis?cod_primaria=${PRIMARIA}&codtemporada=${c.ffcm_temporada}&codcompeticion=${comp}&codgrupo=${grupo}&CodJornada=1`,
+    `${FFCM}/NFG_CmpJornada?cod_primaria=${PRIMARIA}&CodTemporada=${c.ffcm_temporada}&CodGrupo=${grupo}&CodCompeticion=${comp}&CodJornada=${jornada}`,
+  ];
+};
 
 async function fetchText(url: string) {
   const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/126 Mobile Safari/537.36", "Accept-Language": "es-ES,es" } });
@@ -130,14 +135,14 @@ Deno.serve(async (req) => {
     for (const c of comps as Comp[]) {
       if (debug) {
         const out = [];
-        for (const url of pages(c, +debug)) {
+        for (const url of pages(c, { num: +debug, ffcm_competicion: null, ffcm_grupo: null, ffcm_jornada: null })) {
           try { out.push({ url, lines: lines(await getPage(url)) }); } catch (e) { out.push({ url, error: String(e) }); }
         }
         report.push({ competition: c.id, pages: out });
         continue;
       }
       // Jornadas sin cerrar que ya se han jugado (normalmente, la del sábado).
-      const { data: rounds } = await db.from("rounds").select("id,num,match_date,closed")
+      const { data: rounds } = await db.from("rounds").select("id,num,match_date,closed,ffcm_competicion,ffcm_grupo,ffcm_jornada")
         .eq("competition_id", c.id).eq("closed", false).lte("match_date", today).order("match_date", { ascending: false });
       const { data: fixtures } = await db.from("fixtures").select("*").in("round_id", (rounds || []).map((r) => r.id));
       const pending = (r: Round) => (fixtures as Fixture[]).filter((f) => f.round_id === r.id && !f.manual);
@@ -147,7 +152,7 @@ Deno.serve(async (req) => {
         const want = pending(r);
         const res: Record<number, ReturnType<typeof find>> = {};
         const errors: string[] = [];
-        for (const url of pages(c, r.num)) {
+        for (const url of pages(c, r)) {
           if (!planned && want.every((f) => res[f.id]?.score || res[f.id]?.postponed)) break;
           try {
             const ls = lines(await getPage(url));
