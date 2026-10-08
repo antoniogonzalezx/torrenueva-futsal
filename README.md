@@ -45,7 +45,7 @@ Todas las rutas son relativas, así que funciona tanto en la raíz de un dominio
 - **Historial**: recaudación, ranking y movimientos de saldo.
 - **Quiniela** (solo equipos con competición): pestaña con dos apartados.
   - *Jornada*: la jornada abierta, con todos los partidos del grupo menos el nuestro. Signo único acertado: 3 puntos;
-    doble acertado: 1 punto; máximo 4 dobles. Se entrega entera y se puede cambiar hasta el viernes a las 14:00
+    doble acertado: 1 punto; máximo de dobles por competición (senior 4, juvenil 1). Se entrega entera y se puede cambiar hasta el viernes a las 14:00
     (hora de Madrid); después se ven los pronósticos de todos.
   - *Clasificación*: la de la quiniela, total o por jornada (desplegable con las jornadas cerradas).
   - Solo hay una jornada abierta. El domingo a las 22:00 se leen los resultados, se cierra (lo que siga sin
@@ -98,6 +98,10 @@ publicaciones a 1280 px. El bucket `media` acepta solo WebP/JPEG de hasta 1,5 MB
 
 - `scripts/calendario_pdf.py` convierte el PDF de calendario de ffcm.es en SQL (competición, jornadas y partidos).
   Los códigos `codtemporada`, `codcompeticion` y `codgrupo` salen de la URL del calendario en la web.
+  Lo cargado está en `supabase/seeds/`.
+- Cada competición tiene su máximo de dobles (`competitions.max_doubles`) y una jornada puede fijar el suyo
+  (`rounds.max_doubles`). Una jornada también puede leer sus resultados de otra liga (`rounds.ffcm_competicion`,
+  `ffcm_grupo`, `ffcm_jornada`): es el caso de la jornada 0 del juvenil, que usa partidos del senior.
 - ffcm.es devuelve páginas vacías a los servidores de Supabase, así que las descarga GitHub: el workflow
   `.github/workflows/ffcm-sync.yml` se ejecuta los domingos a las 22:00 de Madrid (programado a las 20:00 y 21:00 UTC;
   el script solo sigue en la que toca según el horario de verano o invierno). `scripts/ffcm_fetch.mjs` pide a

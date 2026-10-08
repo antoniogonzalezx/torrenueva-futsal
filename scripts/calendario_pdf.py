@@ -36,7 +36,8 @@ def main():
 
     text = "\n".join(p.extract_text() for p in PdfReader(a.pdf).pages)
 
-    title = re.search(r"^\s*(CAMPEONATO.*?)\s+Temporada", text, re.M)
+    # Título: la línea bajo «Calendario de Competiciones» (CAMPEONATO…, JUVENIL…, CADETE…).
+    title = re.search(r"Calendario de Competiciones\s+(.*?)\s+Temporada", text, re.S)
     comp_name = re.sub(r"\s+", " ", title.group(1)).strip() if title else "Liga"
 
     # Equipos: «  8.- NOMBRE DEL EQUIPO (2660)»
